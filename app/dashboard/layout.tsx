@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db";
 import { logOutUser } from "../actions";
 import { redirect } from "next/navigation";
 import SidebarNav from "./components/SidebarNav";
-import DirectorySearch from "./components/DirectorySearch"; // 👈 FIXED: Connected your live directory search component
 import { LogOut, ChevronDown, Bell } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -83,7 +82,7 @@ export default async function DashboardLayout({
         
         {/* TOP NAVBAR HEADER */}
         <header className="h-16 border-b border-base-300 bg-base-100 flex items-center justify-between px-8 shrink-0 z-30">
-          <div className="flex items-center gap-6 w-full max-w-2xl">
+          <div className="flex items-center gap-6">
             
             {/* Workspace Dropdown */}
             <div className="flex items-center gap-2 bg-base-200 hover:bg-base-300 transition-colors border border-base-300 rounded-xl px-3 py-1.5 cursor-pointer shrink-0">
@@ -93,17 +92,11 @@ export default async function DashboardLayout({
               <span className="font-semibold text-xs text-base-content">{organizationName}</span>
               <ChevronDown className="h-3 w-3 text-base-content/40 stroke-[2.5]" />
             </div>
-
-            {/* 🌟 FIXED: Embedded the live isolated Directory Search input portal here */}
-            <div className="w-full relative">
-              <DirectorySearch />
-            </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0 ml-4">
+          <div className="flex items-center gap-4 shrink-0">
             <button className="btn btn-ghost btn-circle btn-sm relative text-base-content/60 hover:text-base-content">
               <Bell className="h-4 w-4 stroke-[2.2]" />
-              {/* 🎨 FIXED: Replaced hardcoded text marker color with clean semantic utility token */}
               <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-error rounded-full"></span>
             </button>
           </div>
