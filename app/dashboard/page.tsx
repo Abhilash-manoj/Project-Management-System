@@ -19,6 +19,9 @@ export default async function HomeDashboardPage() {
 
   const orgId = membership.organizationId;
   const currentTimestamp = new Date();
+  
+  // Determine if the caller is an administrator/owner context
+  const isWorkspaceAdmin = membership.role === "OWNER" || membership.role === "ADMIN";
 
   // 3. EXECUTE METRIC AGGREGATIONS IN PARALLEL
   const [
@@ -26,6 +29,7 @@ export default async function HomeDashboardPage() {
     completedTasksCount,
     overdueTasksCount,
     activeProjects,
+    completedProjectsCount, // Added target project count aggregation pass for admins
     projectList,
     taskStatusGroupings
   ] = await Promise.all([
@@ -34,7 +38,7 @@ export default async function HomeDashboardPage() {
       where: {
         assigneeId: session.userId,
         project: { organizationId: orgId },
-        status: { not: "DONE" }
+        status: { notIn: ["DONE", "ARCHIVED"] }
       }
     }),
 
@@ -65,7 +69,15 @@ export default async function HomeDashboardPage() {
       }
     }),
 
-    // E. Fetch Top Active Projects with Team and Task details
+    // E. Count Closed/Completed Projects (Used strictly for Admin metric cards)
+    prisma.project.count({
+      where: {
+        organizationId: orgId,
+        status: { in: ["COMPLETED", "ARCHIVED"] }
+      }
+    }),
+
+    // F. Fetch Top Active Projects with Team and Task details
     prisma.project.findMany({
       where: { organizationId: orgId, status: "ACTIVE" },
       take: 3,
@@ -75,7 +87,7 @@ export default async function HomeDashboardPage() {
       }
     }),
 
-    // F. Raw Status Grouping Array for Task Distribution charts
+    // G. Raw Status Grouping Array for Task Distribution charts
     prisma.task.groupBy({
       by: ["status"],
       where: {
@@ -86,16 +98,23 @@ export default async function HomeDashboardPage() {
     })
   ]);
 
-  // 4. MAP STATUS ARRAY TO READABLE OBJECT HOOK DICTIONARIES
+  // 4. MAP STATUS ARRAY WITH STRING SANITIZATION (Fixes Chart Mismatches)
   const distribution = { TODO: 0, IN_PROGRESS: 0, IN_REVIEW: 0, DONE: 0 };
+  
   taskStatusGroupings.forEach(group => {
-    if (group.status in distribution) {
-      distribution[group.status as keyof typeof distribution] = group._count.id;
+    // Transforms text fields like "In Progress" -> "IN_PROGRESS" or "To Do" -> "TODO"
+    const normalizedKey = group.status
+      .toUpperCase()
+      .replace(/\s+/g, "_") as keyof typeof distribution;
+
+    if (normalizedKey in distribution) {
+      distribution[normalizedKey] = group._count.id;
     }
   });
 
-  const totalTasks = assignedTasksCount + completedTasksCount;
-  const progressPercentage = totalTasks > 0 ? Math.round((completedTasksCount / totalTasks) * 100) : 0;
+  // Calculate global task completions for the ring chart indicator
+  const totalTasks = distribution.TODO + distribution.IN_PROGRESS + distribution.IN_REVIEW + distribution.DONE;
+  const progressPercentage = totalTasks > 0 ? Math.round((distribution.DONE / totalTasks) * 100) : 0;
 
   // 5. FORMAT ACTIVE SYSTEM DATETIME STAMP FOR HEADER
   const liveDisplayDate = currentTimestamp.toLocaleDateString("en-US", {
@@ -108,7 +127,7 @@ export default async function HomeDashboardPage() {
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in font-sans text-base-content text-left p-1">
       
-      {/* 🎨 DYNAMIC MAIN GREETING BANNER (Uses theme primary gradient profiles) */}
+      {/* GREETING BANNER */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary to-primary-focus p-6 md:p-8 text-primary-content shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="space-y-1 z-10">
           <p className="text-2xs font-bold uppercase tracking-widest opacity-70">Good Morning 👋</p>
@@ -137,12 +156,18 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* Metric 2: Completed Tasks */}
+        {/* 🌟 Metric 2: DYNAMIC CONDITIONAL CARD ROLES (Completed Projects vs Completed Tasks) */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
-            <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">Completed Tasks</span>
-            <span className="text-3xl font-black text-base-content block tracking-tight">{completedTasksCount}</span>
-            <span className="text-[10px] text-success font-bold block">Progressing smoothly</span>
+            <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">
+              {isWorkspaceAdmin ? "Completed Projects" : "Completed Tasks"}
+            </span>
+            <span className="text-3xl font-black text-base-content block tracking-tight">
+              {isWorkspaceAdmin ? completedProjectsCount : completedTasksCount}
+            </span>
+            <span className="text-[10px] text-success font-bold block">
+              {isWorkspaceAdmin ? "Workspace growth steady" : "Progressing smoothly"}
+            </span>
           </div>
           <div className="p-3 bg-success/10 text-success rounded-xl">
             <CheckCircle2 className="h-5 w-5" />
@@ -190,7 +215,7 @@ export default async function HomeDashboardPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {projectList.map((project) => {
               const projectTotalTasks = project.tasks.length;
-              const projectCompletedTasks = project.tasks.filter(t => t.status === "DONE").length;
+              const projectCompletedTasks = project.tasks.filter(t => t.status.toUpperCase() === "DONE").length;
               const projectProgress = projectTotalTasks > 0 ? Math.round((projectCompletedTasks / projectTotalTasks) * 100) : 0;
 
               return (
@@ -231,14 +256,13 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* TASK DISTRIBUTION STATS GRAPH VIEWER CONTAINER */}
+        {/* TASK DISTRIBUTION */}
         <div className="card bg-base-100 border border-base-300 rounded-2xl p-6 space-y-4 shadow-2xs">
           <div className="border-b border-base-300 pb-2">
             <h3 className="font-black text-sm tracking-tight uppercase text-base-content/60">Task Distribution</h3>
           </div>
 
           <div className="flex flex-col items-center justify-center p-4 space-y-6">
-            {/* 🎨 DYNAMIC PROGRESS RING (Uses theme primary color variables dynamically) */}
             <div className="relative flex items-center justify-center">
               <div 
                 className="radial-progress text-primary font-black text-xl bg-base-200 border-base-300" 
