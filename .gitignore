@@ -39,3 +39,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma
+
+# .gitignore
+
+# Sensitive credential blockades
+.env
+.env.local
+.env.production
+.env.development
+
+# Next.js build cache branches
+.next/
+out/
+build/
+node_modules/
