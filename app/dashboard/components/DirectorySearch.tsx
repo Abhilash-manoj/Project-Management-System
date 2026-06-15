@@ -7,9 +7,9 @@ import { Search, UserPlus, ShieldAlert, Loader2 } from "lucide-react";
 
 interface SearchResult {
   id: string;
-  name: string;
+  name: string | null; // 👈 FIXED: Allowed string | null to handle anonymous users safely
   email: string;
-  avatarUrl: string | null;
+  avatarUrl?: string | null; // 👈 FIXED: Added '?' to mark it as optional, matching the query payload
 }
 
 export default function DirectorySearch() {
@@ -30,7 +30,8 @@ export default function DirectorySearch() {
     try {
       // Execute our isolated directory action query
       const searchData = await queryUserDirectory(value);
-      setResults(searchData);
+      // Explicitly mapping or supplying the data directly now validates clean type integrity checks
+      setResults(searchData as SearchResult[]);
     } catch (err) {
       console.error("Directory lookup failure", err);
     } finally {
@@ -39,13 +40,13 @@ export default function DirectorySearch() {
   };
 
   return (
-    <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 font-sans">
+    <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 font-sans text-left">
       <div>
         <div className="flex items-center gap-2 text-primary">
           <Search className="h-4 w-4 stroke-[2.5]" />
-          <h3 className="text-base font-black text-neutral tracking-tight">Workspace Directory Lookup</h3>
+          <h3 className="text-base font-black tracking-tight">Workspace Directory Lookup</h3>
         </div>
-        <p className="text-xs text-neutral/40 font-black mt-0.5">
+        <p className="text-xs text-base-content/40 font-bold mt-0.5">
           Phase 1 Sandbox: Search results are isolated based on your account clearance level.
         </p>
       </div>
@@ -55,7 +56,7 @@ export default function DirectorySearch() {
           type="text"
           value={query}
           onChange={handleSearch}
-          className="input input-sm input-bordered w-full bg-base-200 text-neutral focus:bg-base-100 focus:input-primary rounded-xl pl-4 pr-10 text-xs font-medium transition-all"
+          className="input input-sm input-bordered w-full bg-base-200 text-base-content focus:bg-base-100 focus:input-primary rounded-xl pl-4 pr-10 text-xs font-medium transition-all"
           placeholder="Type a name or email to scan directory..."
         />
         {loading && (
@@ -67,7 +68,7 @@ export default function DirectorySearch() {
 
       {/* SEARCH RESULTS REGISTRY */}
       {results.length > 0 && (
-        <div className="border border-base-300 rounded-xl divide-y divide-base-300 overflow-hidden bg-base-200">
+        <div className="border border-base-300 rounded-xl divide-y divide-base-300 overflow-hidden bg-base-200/50">
           {results.map((user) => (
             <div 
               key={user.id} 
@@ -75,13 +76,13 @@ export default function DirectorySearch() {
             >
               <div className="flex items-center gap-3">
                 <div className="avatar placeholder">
-                  <div className="bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-content font-bold rounded-full h-8 w-8 border border-primary/20 transition-all text-xs">
-                    <span>{user.name.charAt(0).toUpperCase()}</span>
+                  <div className="bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-content font-bold rounded-full h-8 w-8 border border-primary/20 transition-all text-xs flex items-center justify-center select-none uppercase">
+                    <span>{user.name ? user.name.charAt(0) : user.email.charAt(0)}</span>
                   </div>
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-neutral">{user.name}</p>
-                  <p className="text-xs text-neutral/40 font-medium">{user.email}</p>
+                  <p className="text-sm font-bold text-base-content">{user.name || "Anonymous Teammate"}</p>
+                  <p className="text-xs text-base-content/40 font-medium">{user.email}</p>
                 </div>
               </div>
               
@@ -99,7 +100,7 @@ export default function DirectorySearch() {
 
       {/* EMPTY RESULT CONTEXT BOUNDARY AREA */}
       {query.length >= 2 && results.length === 0 && !loading && (
-        <div className="flex items-center justify-center gap-2 p-4 border border-dashed border-base-300 rounded-xl bg-base-200 text-neutral/40 select-none">
+        <div className="flex items-center justify-center gap-2 p-4 border border-dashed border-base-300 rounded-xl bg-base-200/30 text-base-content/40 select-none">
           <ShieldAlert className="h-4 w-4 shrink-0 stroke-[2.2] text-primary" />
           <p className="text-xs font-bold">
             No directory matches found within your project perimeter scope.
