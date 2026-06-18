@@ -267,7 +267,6 @@ export async function deleteMainTask(taskId: string, projectId: string) {
       prisma.activityLog.create({
         data: {
           projectId: projectId,
-          actorId: session.userId,
           actorName: actorName,
           action: logActivityText,
         },
@@ -394,7 +393,6 @@ export async function updateTaskDetailsAction(payload: UpdateTaskPayload) {
       prisma.activityLog.create({
         data: {
           projectId: payload.projectId,
-          actorId: session.userId,
           actorName: actorName,
           action: logActivityText,
         },
