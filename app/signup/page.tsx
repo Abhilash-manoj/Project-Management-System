@@ -1,6 +1,6 @@
 // app/signup/page.tsx
 import React from "react";
-import { signUpUser } from "../actions";
+import { signUpUser } from "@/app/actions/auth";
 import Link from "next/link";
 import { User, Mail, KeyRound, UserPlus } from "lucide-react"; // Vector standard icons
 

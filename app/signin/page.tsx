@@ -2,9 +2,19 @@
 import React from "react";
 import SignInForm from "./components/SignInForm";
 import Link from "next/link";
-import { LogIn } from "lucide-react"; // Vector icon component
+import { LogIn, ShieldAlert } from "lucide-react"; // 🚀 IMPORTED ShieldAlert
 
-export default function SignInPage() {
+interface PageProps {
+  searchParams: Promise<{
+    error?: string;
+  }>;
+}
+
+export default async function SignInPage({ searchParams }: PageProps) {
+  // 🚀 FIXED: Await and destructure searchParams safely on the server side
+  const { error } = await searchParams;
+  const isDeactivated = error === "deactivated";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-base-200 text-neutral p-6 font-sans antialiased">
       <div className="card w-full max-w-md p-8 bg-base-100 border border-base-300 rounded-2xl shadow-xl space-y-6">
@@ -24,6 +34,19 @@ export default function SignInPage() {
             Enter your workspace credentials to log in
           </p>
         </div>
+
+        {/* 🚀 FIXED: Render the warning banner conditionally if kicked by the middleware access shield */}
+        {isDeactivated && (
+          <div className="alert alert-error text-xs font-bold rounded-xl text-error-content bg-error flex items-start gap-2 text-left p-3 border border-error/20 animate-fade-in">
+            <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-black">Access Gated Workspace Token</p>
+              <p className="font-medium text-[11px] opacity-90 mt-0.5">
+                This user account has been deactivated by the system operations Owner. Contact your workspace administrator for restoration.
+              </p>
+            </div>
+          </div>
+        )}
         
         {/* Renders our clean, type-safe interactive Client form element */}
         <SignInForm />

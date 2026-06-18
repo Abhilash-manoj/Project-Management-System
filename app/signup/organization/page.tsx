@@ -1,6 +1,6 @@
 // app/signup/organization/page.tsx
 import React from "react";
-import { createOrganization } from "../../actions";
+import { createOrganization } from "@/app/actions/workspace";
 import { Building2, Globe, Rocket } from "lucide-react"; // Vector standard icons
 
 interface PageProps {

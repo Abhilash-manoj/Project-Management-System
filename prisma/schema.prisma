@@ -23,21 +23,29 @@ model User {
   assignments     Assignment[]
   createdProjects Project[]    @relation("ProjectCreator")
   assignedTasks   Task[]       @relation("TaskAssignee")
+  createdTasks    Task[]       @relation("TaskCreator")
   
-  // 🔒 FIXED: Explicit back-relation mapping for tracking task ownership permissions
-  createdTasks    Task[]       @relation("TaskCreator") 
+  // 🔒 FIXED: Explicit back-relations for the Communication Engine
+  chatRoomsJoined Participant[]
+  messagesSent    Message[]
+  comments Comment[]
+  receivedNotifications Notification[] @relation("NotificationRecipient")
+  sentNotifications     Notification[] @relation("NotificationSender")
 }
 
 model Organization {
-  id          String       @id @default(cuid())
-  name        String
-  slug        String       @unique
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  members     Membership[]
-  projects    Project[]
-  invitations Invitation[]
-  joinLinks   JoinLink[]
+  id           String         @id @default(cuid())
+  name         String
+  slug         String         @unique
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  members      Membership[]
+  projects     Project[]
+  invitations  Invitation[]
+  joinLinks    JoinLink[]
+  
+  // 🔒 FIXED: Explicit back-relation for multi-tenant conversation scopes
+  conversations Conversation[]
 }
 
 enum OrgRole {
@@ -52,14 +60,17 @@ model Membership {
   userId         String
   organizationId String
   role           OrgRole      @default(EMPLOYEE)
+  status         String     @default("ACTIVE")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department     String?
 
   @@unique([userId, organizationId])
 }
+
 
 // ==========================================================================
 // PROJECT & PORTAL WORKSPACE MANAGEMENT MODELS
@@ -123,20 +134,19 @@ model Task {
   dueDate     DateTime?
   projectId   String
   assigneeId  String?
-  creatorId   String    // 🔒 FIXED: Scalar column tracking task ownership footprint metrics
+  creatorId   String    
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assignee    User?     @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  
-  // 🔒 FIXED: Relational map routing tasks back to their original initialization user record
   creator     User      @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Cascade)
 
   // 🌲 SUB-TASK SELF-REFERENCING STRUCTURE RELATION
   parentId    String?   
   parentTask  Task?     @relation("SubTaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   subTasks    Task[]    @relation("SubTaskHierarchy")
+  comments Comment[]
 
   @@index([projectId])
   @@index([assigneeId])
@@ -189,4 +199,97 @@ model ActivityLog {
 
   @@index([projectId])
   @@index([createdAt(sort: Desc)]) 
+}
+
+// ==========================================================================
+// COMMUNICATION ENGINE RELATION ENGINE
+// ==========================================================================
+
+model Conversation {
+  id             String        @id @default(cuid())
+  name           String?       
+  isGroup        Boolean       @default(false)
+  organizationId String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  participants   Participant[]
+  messages       Message[]
+
+  @@index([organizationId])
+}
+
+model Participant {
+  id             String       @id @default(cuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime     @default(now())
+  lastViewedAt   DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  body           String       @db.Text
+  attachments    String[]     
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt(sort: Desc)])
+}
+
+
+enum NotificationType {
+  TASK_ASSIGNED
+  MENTION
+  TASK_COMPLETED
+  PROJECT_UPDATED
+  INVITATION_ACCEPTED
+  DELETE_TASK
+  EDIT_TASK
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  recipientId    String
+  senderId       String?
+  organizationId String
+  type           NotificationType
+  title          String
+  description    String
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  // Relations
+  recipient      User             @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  sender         User?            @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId])
+  @@index([organizationId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  taskId    String
+  authorId  String
+  createdAt DateTime @default(now())
+
+  // Relations
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([authorId])
 }

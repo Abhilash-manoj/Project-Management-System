@@ -10,10 +10,13 @@ export default async function MyTasksPage() {
   const session = await getSession();
   if (!session) redirect("/signin");
 
-  // Query tasks where the user is an active assignee
+  // Query tasks where the user is EITHER the assignee OR the original creator
   const tasks = await prisma.task.findMany({
     where: {
-      assigneeId: session.userId,
+      OR: [
+        { assigneeId: session.userId },
+        { creatorId: session.userId } 
+      ]
     },
     include: {
       project: {
@@ -22,9 +25,9 @@ export default async function MyTasksPage() {
         },
       },
       assignee: {
-            select: {
-              name: true,
-          },
+        select: {
+          name: true,
+        },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -43,7 +46,7 @@ export default async function MyTasksPage() {
             <h2 className="text-2xl font-black tracking-tight text-neutral">My Tasks</h2>
           </div>
           <p className="text-xs text-neutral/50 font-semibold">
-            {serializedTasks.length} {serializedTasks.length === 1 ? "task" : "tasks"} assigned to you
+            {serializedTasks.filter((t: any) => t.assigneeId === session.userId).length} tasks assigned to you
           </p>
         </div>
       </div>

@@ -4,7 +4,7 @@
 import React, { useActionState, useEffect, useTransition } from "react";
 import { X, ShieldAlert, CheckSquare, Calendar } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createTask } from "../../../../actions";
+import { createTask } from "@/app/actions/tasks"; 
 
 interface MemberOption {
   id: string;

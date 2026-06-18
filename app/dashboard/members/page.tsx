@@ -3,10 +3,11 @@ import React from "react";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers"; // 👈 FIXED: Added headers import for dynamic domain generation pass
+import { headers } from "next/headers"; 
 import MemberOnboardingForm from "./components/MemberOnboardingForm"; 
-import ShareLinkTerminal from "../components/ShareLinkTerminal"; // 👈 FIXED: Connected your reusable absolute copy container terminal
-import { Users, KeyRound, Link as LinkIcon } from "lucide-react"; 
+import ShareLinkTerminal from "../components/ShareLinkTerminal"; 
+import MemberRosterRowControls from "./components/MemberRosterRowControls"; // 🚀 IMPORT THE INTERACTIVE ROW CONTROLS FOR INLINE CLICK MANAGEMENT
+import { Users, KeyRound, Link as LinkIcon, Building } from "lucide-react"; 
 
 export default async function MembersManagementDashboardPage() {
   // 1. Authenticate session context
@@ -25,14 +26,42 @@ export default async function MembersManagementDashboardPage() {
   // 4. Query live active team roster matching active organization space
   const activeTeamMembers = await prisma.membership.findMany({
     where: { organizationId: membership.organizationId },
-    include: { user: { select: { name: true, email: true } } },
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      department: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
+    },
     orderBy: { role: "asc" },
   });
 
-  // 5. Query active bulk links (Only compiled for Admin viewing options)
+  // 5. Query active bulk links (Only valid, unexpired, and unspent links are retrieved)
+  const currentTimestampDate = new Date();
   const deployedJoinLinks = isInternalAdmin
     ? await prisma.joinLink.findMany({
-        where: { organizationId: membership.organizationId },
+        where: { 
+          organizationId: membership.organizationId,
+          // 🚀 FIXED: Dynamic database filter hides links immediately when they expire or hit use allocations
+          AND: [
+            {
+              currentUses: {
+                lt: prisma.joinLink.fields.maxUses 
+              }
+            },
+            {
+              expiresAt: {
+                gt: currentTimestampDate 
+              }
+            }
+          ]
+        },
         orderBy: { createdAt: "desc" },
       })
     : [];
@@ -46,7 +75,7 @@ export default async function MembersManagementDashboardPage() {
     : [];
 
   // ==========================================================================
-  // 🌐 FIXED: DETECT THE SYSTEM HOST NAME PREFIX DIRECTLY ON THE SERVER PAGE
+  // 🌐 DETECT THE SYSTEM HOST NAME PREFIX DIRECTLY ON THE SERVER PAGE
   // ==========================================================================
   const headersList = await headers();
   const activeHost = headersList.get("host") || "localhost:3000";
@@ -80,7 +109,7 @@ export default async function MembersManagementDashboardPage() {
           </div>
         ) : (
           /* Notice plate rendered explicitly to Employees explaining directory boundaries */
-          <div className="card bg-base-100 border border-base-300 p-5 space-y-3 text-neutral/60 shadow-xs">
+          <div className="card bg-base-100 border border-base-300 p-5 space-y-3 text-neutral/60 shadow-xs text-left">
             <div className="flex items-center gap-2 text-warning">
               <KeyRound className="h-4 w-4 stroke-[2.5]" />
               <h4 className="font-black text-neutral text-sm">Clearance Restricted</h4>
@@ -96,7 +125,7 @@ export default async function MembersManagementDashboardPage() {
           
           {/* Active Workspace Directory Card */}
           <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4">
-            <h3 className="font-black text-sm uppercase tracking-wider text-neutral/40">
+            <h3 className="font-black text-sm uppercase tracking-wider text-neutral/40 text-left">
               Active Team Roster ({activeTeamMembers.length})
             </h3>
             
@@ -109,16 +138,50 @@ export default async function MembersManagementDashboardPage() {
                         <span>{member.user.name.charAt(0).toUpperCase()}</span>
                       </div>
                     </div>
-                    <div>
-                      <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
-                      <p className="text-xs text-neutral/40 font-semibold">{member.user.email}</p>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
+                        {/* Status Bubble Tag Element Indicator */}
+                        <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.2 border ${
+                          member.status === "INACTIVE" 
+                            ? "bg-error/10 text-error border-error/20" 
+                            : "bg-success/10 text-success border-success/20"
+                        }`}>
+                          {member.status || "ACTIVE"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-neutral/40 font-semibold leading-tight">{member.user.email}</p>
+                      
+                      {/* Dynamic plain text department render string with high-visibility fallback tag */}
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-neutral/40 flex items-center gap-1 mt-1 select-none">
+                        <Building className="h-3 w-3 text-neutral/30 stroke-[2.2]" /> 
+                        {member.department && member.department.trim() !== "" ? (
+                          <span className="text-primary font-black">{member.department} Division</span>
+                        ) : (
+                          <span className="italic opacity-50 font-semibold">Unassigned</span>
+                        )}
+                      </p>
                     </div>
                   </div>
                   
-                  <span className="badge bg-base-200 border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
-                    {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
-                    {member.role}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="badge bg-base-200 border border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
+                      {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
+                      {member.role}
+                    </span>
+
+                    {/* EMBEDDED CONTROL TRIGGER PANEL SLOT */}
+                    <MemberRosterRowControls 
+                      targetUser={{
+                        id: member.user.id,
+                        name: member.user.name,
+                        role: member.role,
+                        status: member.status || "ACTIVE"
+                      }}
+                      currentUserId={session.userId}
+                      currentUserOrgRole={membership.role}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -129,12 +192,11 @@ export default async function MembersManagementDashboardPage() {
             <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 animate-fade-in">
               <div className="flex items-center gap-2 text-neutral/50">
                 <LinkIcon className="h-4 w-4 stroke-[2.2]" />
-                <h3 className="font-black text-sm uppercase tracking-wider text-neutral/40">
+                <h3 className="font-black text-sm uppercase tracking-wider text-neutral/40 text-left">
                   Onboarding Cohort Share Links
                 </h3>
               </div>
               
-              {/* 👇 FIXED: Reconfigured mapping block grid layout arrays to render the copy-safe component terminals */}
               <div className="grid grid-cols-1 gap-4">
                 {deployedJoinLinks.map((link) => {
                   const absoluteLinkUrl = `${systemAbsoluteOrigin}/join/${link.token}`;

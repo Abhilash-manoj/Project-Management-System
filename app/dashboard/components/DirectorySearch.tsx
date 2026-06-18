@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { queryUserDirectory } from "../../actions";
+import { queryUserDirectory } from "@/app/actions/communication";
 import { Search, UserPlus, ShieldAlert, Loader2 } from "lucide-react"; 
 
 interface SearchResult {

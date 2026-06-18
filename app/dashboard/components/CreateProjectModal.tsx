@@ -1,8 +1,8 @@
 // app/dashboard/components/CreateProjectModal.tsx
 "use client";
 
-import React, { useState, useActionState } from "react";
-import { createProject } from "../../actions";
+import React, { useState, useActionState, useEffect } from "react";
+import { createProject } from "@/app/actions/projects";
 import { Plus, X, FolderPlus, AlertCircle, Loader2, Calendar } from "lucide-react"; 
 
 interface ActionState {
@@ -14,14 +14,32 @@ const initialState: ActionState = {
   error: null,
 };
 
-export default function CreateProjectModal() {
-  const [isOpen, setIsOpen] = useState(false);
+// 🚀 FIXED: Added optional controlled properties to interface parameter block
+interface CreateProjectModalProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export default function CreateProjectModal({ isOpen: controlledIsOpen, onClose }: CreateProjectModalProps) {
+  // 🚀 FIXED: Fall back to local state management gracefully if parent parameters aren't supplied
+  const [localIsOpen, setLocalIsOpen] = useState(false);
+  
+  const isControlled = controlledIsOpen !== undefined;
+  const isModalOpen = isControlled ? controlledIsOpen : localIsOpen;
+
+  const handleCloseModal = () => {
+    if (isControlled && onClose) {
+      onClose();
+    } else {
+      setLocalIsOpen(false);
+    }
+  };
 
   const [state, formAction, isPending] = useActionState(
     async (prevState: ActionState, formData: FormData): Promise<ActionState> => {
       const result = await createProject(formData);
       if (result?.success) {
-        setIsOpen(false); 
+        handleCloseModal(); // Safely bubble state flags up or down
         return { error: null, success: true };
       }
       return result || { error: null };
@@ -31,17 +49,19 @@ export default function CreateProjectModal() {
 
   return (
     <>
-      {/* TRIGGER BUTTON */}
-      <button 
-        onClick={() => setIsOpen(true)}
-        className="btn btn-primary btn-sm rounded-xl font-bold gap-2 shadow-sm cursor-pointer text-primary-content"
-      >
-        <Plus className="h-4 w-4 stroke-[2.5]" />
-        New Project
-      </button>
+      {/* TRIGGER BUTTON: Only render this button if the modal is operating independently */}
+      {!isControlled && (
+        <button 
+          onClick={() => setLocalIsOpen(true)}
+          className="btn btn-primary btn-sm rounded-xl font-bold gap-2 shadow-sm cursor-pointer text-primary-content"
+        >
+          <Plus className="h-4 w-4 stroke-[2.5]" />
+          New Project
+        </button>
+      )}
 
-      {/* MODAL BACKDROP */}
-      {isOpen && (
+      {/* MODAL BACKDROP CONTAINER */}
+      {isModalOpen && (
         <div className="modal modal-open fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/40 backdrop-blur-xs transition-all duration-200">
           <div className="modal-box w-full max-w-md bg-base-100 border border-base-300 p-6 rounded-2xl shadow-xl relative space-y-4">
             
@@ -56,7 +76,7 @@ export default function CreateProjectModal() {
               </div>
               <button 
                 type="button"
-                onClick={() => setIsOpen(false)} 
+                onClick={handleCloseModal} 
                 className="btn btn-ghost btn-xs btn-circle text-neutral/40 hover:text-neutral cursor-pointer"
               >
                 <X className="h-4 w-4 stroke-[2.5]" />
@@ -107,7 +127,7 @@ export default function CreateProjectModal() {
                 />
               </div>
 
-              {/* 👇 NEW INPUT FIELD: PROJECT LEVEL DUE DATE TARGET */}
+              {/* Input: Project Level Due Date Target */}
               <div className="form-control w-full">
                 <label className="label py-1">
                   <span className="label-text text-[10px] font-bold text-neutral/50 uppercase tracking-wider flex items-center gap-1">
@@ -126,7 +146,7 @@ export default function CreateProjectModal() {
               <div className="modal-action flex items-center justify-end gap-2 pt-3 border-t border-base-300 mt-2">
                 <button 
                   type="button" 
-                  onClick={() => setIsOpen(false)}
+                  onClick={handleCloseModal}
                   disabled={isPending}
                   className="btn btn-ghost btn-sm rounded-xl font-bold text-neutral/50 hover:bg-base-200 hover:text-neutral transition-colors cursor-pointer"
                 >

@@ -3,7 +3,7 @@ import React from "react";
 import { prisma } from "@/lib/db";
 import IngestionFormWrapper from "./components/IngestionFormWrapper"; 
 import Link from "next/link";
-import { ShieldX, Sparkles } from "lucide-react"; // Vector icon components
+import { ShieldX, Sparkles } from "lucide-react"; 
 
 interface InvitePageProps {
   params: Promise<{ token: string }>;
@@ -24,7 +24,7 @@ export default async function InviteIngestionPage({ params }: InvitePageProps) {
       <div className="flex min-h-screen items-center justify-center bg-base-200 text-neutral p-6 font-sans antialiased">
         <div className="card w-full max-w-md p-8 text-center bg-base-100 border border-base-300 rounded-2xl space-y-4 shadow-xl items-center">
           <div className="avatar placeholder mb-2">
-            <div className="bg-error/10 text-error rounded-full h-14 w-14 border border-error/20">
+            <div className="bg-error/10 text-error rounded-full h-14 w-14 border border-error/20 flex items-center justify-center">
               <ShieldX className="h-6 w-6 stroke-[2.2]" />
             </div>
           </div>
@@ -64,8 +64,12 @@ export default async function InviteIngestionPage({ params }: InvitePageProps) {
           </p>
         </div>
 
-        {/* Deliver dynamic token hook context parameters to interactive layout container */}
-        <IngestionFormWrapper token={token} targetEmail={inviteContext.email} />
+        {/* 🚀 FIXED: Pass down the conditional mandate flag to trigger the plain text department field inside the wrapper */}
+        <IngestionFormWrapper 
+          token={token} 
+          targetEmail={inviteContext.email} 
+          requireDepartment={true} 
+        />
 
       </div>
     </div>

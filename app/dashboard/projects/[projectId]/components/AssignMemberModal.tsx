@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useTransition, useRef } from "react";
 import { X, UserPlus, AlertCircle, Loader2, Search, Check, User } from "lucide-react";
-import { assignUserToProject, getSearchableUsers, SearchableUser } from "../../../../actions";
+import { assignUserToProject, getSearchableUsers, SearchableUser } from "@/app/actions/projects";
 
 interface ModalProps {
   projectId: string;

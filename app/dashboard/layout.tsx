@@ -2,9 +2,11 @@
 import React from "react";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { logOutUser } from "../actions";
+import { logOutUser } from "@/app/actions/auth";
+import { getUnreadNotificationCount } from "@/app/actions/notifications"; 
 import { redirect } from "next/navigation";
 import SidebarNav from "./components/SidebarNav";
+import Link from "next/link"; 
 import { LogOut, ChevronDown, Bell } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -22,7 +24,13 @@ export default async function DashboardLayout({
 
   const organizationName = userMembership?.organization?.name || "No Workspace";
   const organizationInitial = organizationName.charAt(0).toUpperCase();
+  const orgId = userMembership?.organizationId || "";
   
+  // 🚀 FETCH LIVE UNREAD ALERTS COUNTS ON SERVER BOOT
+  const unreadAlertsCount = orgId 
+    ? await getUnreadNotificationCount(session.userId, orgId) 
+    : 0;
+
   const userInitials = session.name
     .split(" ")
     .map((word) => word[0])
@@ -44,7 +52,7 @@ export default async function DashboardLayout({
             <span className="font-bold text-xl tracking-tight text-base-content">Nexus</span>
           </div>
 
-          <SidebarNav />
+          <SidebarNav currentUserId={session.userId} organizationId={orgId} />
         </div>
 
         {/* PROFILE CARD */}
@@ -81,9 +89,8 @@ export default async function DashboardLayout({
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         
         {/* TOP NAVBAR HEADER */}
-        <header className="h-16 border-b border-base-300 bg-base-100 flex items-center justify-between px-8 shrink-0 z-30">
+        <header className="h-16 border-b border-b-base-300 bg-base-100 flex items-center justify-between px-8 shrink-0 z-30">
           <div className="flex items-center gap-6">
-            
             {/* Workspace Dropdown */}
             <div className="flex items-center gap-2 bg-base-200 hover:bg-base-300 transition-colors border border-base-300 rounded-xl px-3 py-1.5 cursor-pointer shrink-0">
               <span className="badge badge-primary badge-sm font-bold text-primary-content rounded-md p-1.5">
@@ -95,10 +102,19 @@ export default async function DashboardLayout({
           </div>
 
           <div className="flex items-center gap-4 shrink-0">
-            <button className="btn btn-ghost btn-circle btn-sm relative text-base-content/60 hover:text-base-content">
+            {/* 🚀 FIXED: Wrapped Bell inside routing Link and changed indicator to dynamic unread count */}
+            <Link 
+              href="/dashboard/notifications" 
+              className="btn btn-ghost btn-circle btn-sm relative text-base-content/60 hover:text-base-content"
+              title="View system event notifications"
+            >
               <Bell className="h-4 w-4 stroke-[2.2]" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-error rounded-full"></span>
-            </button>
+              {unreadAlertsCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 badge badge-error badge-xs font-extrabold text-[9px] px-1 text-error-content min-w-4 h-4 rounded-full shadow-xs">
+                  {unreadAlertsCount}
+                </span>
+              )}
+            </Link>
           </div>
         </header>
 

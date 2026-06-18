@@ -3,7 +3,7 @@ import React from "react";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
-import { CheckSquare, CheckCircle2, AlertTriangle, Folder } from "lucide-react";
+import { CheckSquare, CheckCircle2, AlertTriangle, Folder, Calendar } from "lucide-react";
 
 export default async function HomeDashboardPage() {
   // 1. Authenticate user context session pipeline
@@ -20,8 +20,15 @@ export default async function HomeDashboardPage() {
   const orgId = membership.organizationId;
   const currentTimestamp = new Date();
   
+  // 🚀 FIXED: Extract the raw text department string securely with a strong server-side fallback
+  const currentDepartmentString = membership.department && membership.department.trim() !== "" 
+    ? membership.department.trim() 
+    : "Unassigned";
+
   // Determine if the caller is an administrator/owner context
-  const isWorkspaceAdmin = membership.role === "OWNER" || membership.role === "ADMIN";
+  const isGlobalOwner = membership.role === "OWNER";
+  const isGlobalAdmin = membership.role === "ADMIN";
+  const isWorkspaceAdmin = isGlobalOwner || isGlobalAdmin;
 
   // 3. EXECUTE METRIC AGGREGATIONS IN PARALLEL
   const [
@@ -77,10 +84,40 @@ export default async function HomeDashboardPage() {
       }
     }),
 
-    // F. Fetch Top Active Projects with Team and Task details
+    // F. Fetch Top Active Projects with Role Security Constraints
     prisma.project.findMany({
-      where: { organizationId: orgId, status: "ACTIVE" },
+      where: { 
+        organizationId: orgId, 
+        status: "ACTIVE",
+        AND: [
+          // Limit overview visibility rules exactly based on user role
+          isGlobalOwner
+            ? {} // Owners bypass view filters completely
+            : isGlobalAdmin
+            ? {
+                OR: [
+                  { visibility: "PUBLIC" },
+                  { visibility: "PRIVATE" }
+                ]
+              }
+            : {
+                // Employees & Guests can ONLY see public projects, or private ones they are assigned to
+                OR: [
+                  { visibility: "PUBLIC" },
+                  {
+                    visibility: "PRIVATE",
+                    assignments: {
+                      some: {
+                        userId: session.userId
+                      }
+                    }
+                  }
+                ]
+              }
+        ]
+      },
       take: 3,
+      orderBy: { createdAt: "desc" },
       include: {
         assignments: { include: { user: { select: { name: true } } } },
         tasks: { select: { status: true } }
@@ -102,7 +139,6 @@ export default async function HomeDashboardPage() {
   const distribution = { TODO: 0, IN_PROGRESS: 0, IN_REVIEW: 0, DONE: 0 };
   
   taskStatusGroupings.forEach(group => {
-    // Transforms text fields like "In Progress" -> "IN_PROGRESS" or "To Do" -> "TODO"
     const normalizedKey = group.status
       .toUpperCase()
       .replace(/\s+/g, "_") as keyof typeof distribution;
@@ -127,17 +163,42 @@ export default async function HomeDashboardPage() {
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in font-sans text-base-content text-left p-1">
       
-      {/* GREETING BANNER */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary to-primary-focus p-6 md:p-8 text-primary-content shadow-md flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="space-y-1 z-10">
-          <p className="text-2xs font-bold uppercase tracking-widest opacity-70">Good Morning 👋</p>
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight">{session.name}</h1>
-          <p className="text-xs font-medium opacity-90">
-            You have <span className="font-bold underline decoration-wavy">{assignedTasksCount} tasks</span> pending and <span className="font-bold">{overdueTasksCount} overdue</span> inside <span className="font-black">{membership.organization.name}</span>.
-          </p>
+      {/* GREETING HERO BANNER OVERHAUL */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary to-blue-600 p-6 md:p-8 text-primary-content shadow-md border border-primary/10 flex flex-col md:flex-row md:items-center md:justify-between gap-6 select-none">
+        {/* Background Decorative Abstract Blur Elements */}
+        <div className="absolute top-0 right-0 -mt-12 -mr-12 w-48 h-48 rounded-full bg-white/5 blur-2xl pointer-events-none" />
+        <div className="absolute bottom-0 right-1/4 -mb-16 w-64 h-64 rounded-full bg-blue-400/10 blur-3xl pointer-events-none" />
+
+        <div className="space-y-2 z-10 text-left max-w-xl">
+          {/* 🚀 FIXED: Renders the custom text department title cleanly above user's full name line layout */}
+          <div className="inline-flex items-center gap-1.5 bg-white/10 border border-white/10 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-xs text-white">
+            👋 {currentDepartmentString} Division
+          </div>
+          <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white">{session.name}</h1>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-xs md:text-sm font-semibold text-white/90">
+            <p>
+              You have <span className="bg-white text-primary px-1.5 py-0.5 rounded-md font-black text-xs shadow-xs mx-0.5">{assignedTasksCount} tasks</span> pending
+            </p>
+            <span className="opacity-30 hidden sm:inline">•</span>
+            <p>
+              and <span className={`px-1.5 py-0.5 rounded-md font-black text-xs ${overdueTasksCount > 0 ? "bg-error text-error-content" : "bg-white/20 text-white"}`}>{overdueTasksCount} overdue</span> inside <span className="text-white font-black underline decoration-white/30 underline-offset-2">{membership.organization.name}</span>
+            </p>
+          </div>
         </div>
-        <div className="text-right z-10 shrink-0 select-none hidden sm:block opacity-70 font-mono text-xs font-bold tracking-wider uppercase border border-primary-content/20 bg-primary-content/10 p-3 rounded-xl">
-          📅 {liveDisplayDate}
+
+        {/* Wrapped Date in a high-contrast high-visibility translucent glass pill box */}
+        <div className="z-10 shrink-0 self-start md:self-center">
+          <div className="flex items-center gap-2.5 bg-neutral-950/20 border border-white/10 px-4 py-2.5 rounded-xl shadow-xs backdrop-blur-md">
+            <div className="bg-white/10 p-1.5 rounded-lg border border-white/10">
+              <Calendar className="h-4 w-4 text-blue-200 stroke-[2.2]" />
+            </div>
+            <div className="text-left space-y-0.5">
+              <p className="text-[9px] font-black uppercase tracking-wider text-blue-200/60 leading-none">Current Date Timeline</p>
+              <p className="text-xs md:text-sm font-black text-white tracking-tight leading-none">
+                {liveDisplayDate}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -156,7 +217,7 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* 🌟 Metric 2: DYNAMIC CONDITIONAL CARD ROLES (Completed Projects vs Completed Tasks) */}
+        {/* Metric 2: Completed Projects vs Tasks */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
             <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">
@@ -256,7 +317,7 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* TASK DISTRIBUTION */}
+        {/* TASK DISTRIBUTION CHART BREAKDOWN */}
         <div className="card bg-base-100 border border-base-300 rounded-2xl p-6 space-y-4 shadow-2xs">
           <div className="border-b border-base-300 pb-2">
             <h3 className="font-black text-sm tracking-tight uppercase text-base-content/60">Task Distribution</h3>
@@ -301,7 +362,6 @@ export default async function HomeDashboardPage() {
               </div>
             </div>
           </div>
-
         </div>
 
       </div>

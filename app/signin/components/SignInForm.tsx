@@ -2,7 +2,7 @@
 "use client"; 
 
 import React, { useActionState } from "react";
-import { signInUser } from "../../actions";
+import { signInUser } from "@/app/actions/auth";
 import { Mail, KeyRound, ArrowRight, ShieldAlert, Loader2 } from "lucide-react"; // Vector standard icons
 
 interface ActionState {

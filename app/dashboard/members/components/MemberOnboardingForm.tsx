@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useActionState } from "react";
-import { createIndividualInvitation, generateProjectJoinLink } from "../../../actions";
+import { createIndividualInvitation, generateProjectJoinLink } from "@/app/actions/workspace"; 
 import { UserPlus, Link2, Mail, Shield, ShieldAlert, Loader2 } from "lucide-react";
 import ShareLinkTerminal from "../../components/ShareLinkTerminal"; // 🤝 Verified and connected cleanly
 

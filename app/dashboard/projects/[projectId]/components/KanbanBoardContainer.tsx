@@ -1,7 +1,7 @@
 // app/dashboard/projects/[projectId]/components/KanbanBoardContainer.tsx
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react"; // 👈 FIXED: Imported useEffect for state-to-props reactive re-renders
+import React, { useState, useEffect, useTransition } from "react"; 
 import { 
   AlertCircle, 
   CheckCircle2, 
@@ -12,15 +12,14 @@ import {
   User, 
   Plus, 
   CheckSquare,
-  Trash2 
+  Trash2,
+  Edit3,
+  Save,
+  RotateCcw
 } from "lucide-react";
-import { 
-  updateTaskStatus, 
-  toggleTaskCompletion, 
-  deleteMainTask, 
-  deleteSubTask 
-} from "../../../../actions";
+import { deleteMainTask, deleteSubTask, updateTaskStatus, toggleTaskCompletion, updateTaskDetailsAction } from "@/app/actions/tasks"; // 🚀 IMPORTED: updateTaskDetailsAction
 import AddTaskModalDialog from "./AddTaskModalDialog";
+import TaskComments from "@/app/dashboard/tasks/components/TaskComments"; 
 
 type TaskStatus = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
 
@@ -63,19 +62,22 @@ export default function KanbanBoardContainer({
   const [tasks, setTasks] = useState<KanbanTask[]>(initialTasks);
   const [activeDetailedTaskId, setActiveDetailedTaskId] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  // 🚀 NEW: INLINE DRAWER TASK FIELD STATE BUFFERS
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPriority, setEditPriority] = useState<any>("LOW");
+  const [editDueDate, setEditDueDate] = useState("");
 
   // Add-Task Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeParentId, setActiveParentId] = useState<string | null>(null);
 
-  // ==========================================================================
-  // ⚡ FIXED: REACTIVE SERVER-DATA STATE RE-RENDER SYNC ENGINE
-  // ==========================================================================
   useEffect(() => {
     setTasks(initialTasks);
-  }, [initialTasks]); // 👈 Automatically triggers whenever Next.js updates server props
-  // ==========================================================================
+  }, [initialTasks]);
 
   const columns: { id: TaskStatus; title: string; colorClass: string; icon: React.ReactNode }[] = [
     { id: "TODO", title: "To Do", colorClass: "bg-base-300", icon: <Circle className="h-4 w-4 text-neutral/40" /> },
@@ -84,12 +86,54 @@ export default function KanbanBoardContainer({
     { id: "DONE", title: "Completed", colorClass: "bg-success", icon: <CheckCircle2 className="h-4 w-4 text-success" /> },
   ];
 
-  // Always pull the absolute freshest data parameters from the core state loop array
   const activeDetailedTask = tasks.find(t => t.id === activeDetailedTaskId) || null;
 
-  // ==========================================================================
-  // GRANULAR DELETION HANDLERS LAYER
-  // ==========================================================================
+  // 🚀 NEW: SEED BUFFER DICTIONARY ROWS UPON ACTIVE SELECT CLICKS
+  const handleOpenDetailedDrawer = (task: KanbanTask) => {
+    setActiveDetailedTaskId(task.id);
+    setIsEditing(false);
+    setEditTitle(task.title);
+    setEditDescription(task.description || "");
+    setEditPriority(task.priority);
+    setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : "");
+  };
+
+  // 🚀 NEW: DISPATCH MODIFIED DRAWER PARAMETERS TO THE DATABASE LAYER
+  const handleSaveInlineKanbanTask = () => {
+    if (!activeDetailedTask) return;
+    if (!editTitle.trim()) {
+      setErrorToast("Validation Error: Task title property string cannot be empty.");
+      return;
+    }
+
+    startTransition(async () => {
+      const res = await updateTaskDetailsAction({
+        taskId: activeDetailedTask.id,
+        projectId: projectId,
+        title: editTitle,
+        description: editDescription,
+        priority: editPriority === "CRITICAL" ? "URGENT" : editPriority,
+        status: activeDetailedTask.status,
+        dueDate: editDueDate || null,
+      });
+
+      if (res?.error) {
+        setErrorToast(res.error);
+        setTimeout(() => setErrorToast(null), 5000);
+      } else {
+        setIsEditing(false);
+        // Sync local client state representation row attributes instantly
+        setTasks(prev => prev.map(t => t.id === activeDetailedTask.id ? {
+          ...t,
+          title: editTitle,
+          description: editDescription,
+          priority: editPriority,
+          dueDate: editDueDate || null
+        } : t));
+      }
+    });
+  };
+
   const handleDeleteMasterCard = (taskId: string) => {
     if (!confirm("CRITICAL ACTIONS WARNING: Are you sure you want to permanently delete this master task card? All child checkpoint arrays will be deleted.")) return;
 
@@ -100,7 +144,7 @@ export default function KanbanBoardContainer({
         setTimeout(() => setErrorToast(null), 5000);
       } else {
         setTasks(prev => prev.filter(t => t.id !== taskId));
-        setActiveDetailedTaskId(null); // Terminate sidebar focus
+        setActiveDetailedTaskId(null); 
       }
     });
   };
@@ -119,7 +163,6 @@ export default function KanbanBoardContainer({
       }
     });
   };
-  // ==========================================================================
 
   const handleDropdownStatusChange = (taskId: string, targetStatus: TaskStatus) => {
     const previousTasksState = [...tasks];
@@ -239,7 +282,7 @@ export default function KanbanBoardContainer({
                   return (
                     <div 
                       key={task.id}
-                      onClick={() => setActiveDetailedTaskId(task.id)}
+                      onClick={() => handleOpenDetailedDrawer(task)} // 🚀 FIXED: Captures full edit states dynamically on click
                       className="card bg-base-100 border border-base-300 p-4 rounded-xl shadow-2xs hover:shadow-sm hover:border-primary/40 transition-all cursor-pointer space-y-3 group text-left"
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -268,7 +311,7 @@ export default function KanbanBoardContainer({
       </div>
 
       {/* ========================================================================== */}
-      {/* SIDE DRAWER SLIDEOUT PANEL */}
+      {/* SIDE DRAWER SLIDEOUT PANEL WITH FULL EDIT ENGINE INTERPRETATION */}
       {/* ========================================================================== */}
       {activeDetailedTask && (
         <div className="fixed inset-0 z-50 flex justify-end bg-neutral-950/40 backdrop-blur-xs animate-fade-in">
@@ -283,7 +326,39 @@ export default function KanbanBoardContainer({
               </div>
               
               <div className="flex items-center gap-1">
-                {/* 🔒 FIXED: Renders Master Card Deletion Trash Action gate to Owners or the explicit Admin creator */}
+                {/* 🚀 NEW: TASK INTERACTIVE EDIT OPERATIONS SWITCH GATE PANEL */}
+                {canMutate && (
+                  <>
+                    {!isEditing ? (
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="btn btn-ghost btn-xs rounded-lg gap-1 font-bold text-neutral/50 hover:text-primary hover:bg-primary/5 h-7 px-2 cursor-pointer transition-colors"
+                        title="Edit Task Scope Parameters"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" /> Edit
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1 animate-fade-in">
+                        <button
+                          disabled={isPending}
+                          onClick={handleSaveInlineKanbanTask}
+                          className="btn btn-success btn-xs btn-circle h-7 w-7 p-0 cursor-pointer"
+                          title="Save Mutated Values"
+                        >
+                          <Save className="h-3.5 w-3.5 text-success-content" />
+                        </button>
+                        <button
+                          onClick={() => setIsEditing(false)}
+                          className="btn btn-ghost btn-xs btn-circle h-7 w-7 p-0 hover:bg-base-200 cursor-pointer"
+                          title="Discard Mutation"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 text-neutral/40" />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 {canMutate && (currentUserRole === "OWNER" || (currentUserRole === "ADMIN" && activeDetailedTask.creatorId === currentUserId)) && (
                   <button 
                     onClick={() => handleDeleteMasterCard(activeDetailedTask.id)}
@@ -297,17 +372,58 @@ export default function KanbanBoardContainer({
               </div>
             </div>
 
+            {/* INTERACTIVE TITLE & DESCRIPTION COMPILER NODES */}
             <div className="space-y-2">
-              <h2 className="text-xl font-black text-neutral tracking-tight leading-tight">{activeDetailedTask.title}</h2>
-              <p className="text-xs text-neutral/50 font-medium leading-relaxed bg-base-200/40 p-3 rounded-xl border border-base-300/30">
-                {activeDetailedTask.description || "No supplemental details parameters declared for this task."}
-              </p>
+              {!isEditing ? (
+                <>
+                  <h2 className="text-xl font-black text-neutral tracking-tight leading-tight">{activeDetailedTask.title}</h2>
+                  <p className="text-xs text-neutral/50 font-medium leading-relaxed bg-base-200/40 p-3 rounded-xl border border-base-300/30">
+                    {activeDetailedTask.description || "No supplemental details parameters declared for this task."}
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-3 animate-fade-in">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-bold text-neutral/40 uppercase tracking-wide">Modify Task Title</span>
+                    <input 
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="input input-sm input-bordered w-full bg-base-200 rounded-xl text-xs font-bold focus:bg-base-100 focus:input-primary transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-bold text-neutral/40 uppercase tracking-wide">Modify Task Description</span>
+                    <textarea 
+                      value={editDescription}
+                      rows={3}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      className="textarea textarea-bordered bg-base-200 rounded-xl w-full text-xs font-medium leading-relaxed resize-none focus:bg-base-100 focus:textarea-primary transition-all p-2"
+                      placeholder="Add design specs or notes..."
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* METRICS CONTROL ARCHITECTURAL BLOCK GRID */}
             <div className="grid grid-cols-2 gap-4 bg-base-200/50 border border-base-300/50 p-4 rounded-2xl text-xs font-bold">
               <div className="space-y-1">
                 <span className="text-[10px] text-neutral/40 uppercase tracking-wider block">Priority</span>
-                <span className="badge badge-sm rounded-md font-black uppercase tracking-wide bg-warning/10 border-warning/20 text-warning-content">{activeDetailedTask.priority}</span>
+                {!isEditing ? (
+                  <span className="badge badge-sm rounded-md font-black uppercase tracking-wide bg-warning/10 border-warning/20 text-warning-content">{activeDetailedTask.priority}</span>
+                ) : (
+                  <select
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(e.target.value as any)}
+                    className="select select-bordered select-xs text-xs font-bold bg-base-100 rounded-lg w-full mt-0.5"
+                  >
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                  </select>
+                )}
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] text-neutral/40 uppercase tracking-wider block">Current Workflow Stage</span>
@@ -325,15 +441,25 @@ export default function KanbanBoardContainer({
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] text-neutral/40 uppercase tracking-wider block flex items-center gap-1"><Calendar className="h-3 w-3" /> Target Deadline</span>
-                <span className="text-neutral/70 font-black">{activeDetailedTask.dueDate ? new Date(activeDetailedTask.dueDate).toLocaleDateString() : "No Deadline Set"}</span>
+                {!isEditing ? (
+                  <span className="text-neutral/70 font-black block pt-1">{activeDetailedTask.dueDate ? new Date(activeDetailedTask.dueDate).toLocaleDateString() : "No Deadline Set"}</span>
+                ) : (
+                  <input 
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="input input-bordered input-xs font-bold text-xs bg-base-100 rounded-lg cursor-pointer w-full mt-0.5"
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] text-neutral/40 uppercase tracking-wider block flex items-center gap-1"><User className="h-3 w-3" /> Assignee Team Member</span>
-                <span className="text-neutral/70 font-black">{activeDetailedTask.assignee?.name || "Unassigned"}</span>
+                <span className="text-neutral/70 font-black block pt-1">{activeDetailedTask.assignee?.name || "Unassigned"}</span>
               </div>
             </div>
 
-            <div className="space-y-3">
+            {/* CHECKLIST DROPDOWN CONTAINER SUBTASKS SEGMENT */}
+            <div className="space-y-3 pb-4 border-b border-base-300">
               <div className="flex items-center justify-between border-b border-base-300 pb-2">
                 <h3 className="text-xs font-black uppercase tracking-wider text-neutral/60 flex items-center gap-2">
                   Checklist Progress ({activeDetailedTask.subTasks.filter(s => s.status === "DONE").length}/{activeDetailedTask.subTasks.length})
@@ -373,7 +499,6 @@ export default function KanbanBoardContainer({
                         </span>
                       </div>
 
-                      {/* 🔒 FIXED: Render sub-task deletion cancel asset explicitly to Owners or the native item creator */}
                       {canMutate && (currentUserRole === "OWNER" || sub.creatorId === currentUserId) && (
                         <button
                           type="button"
@@ -391,6 +516,14 @@ export default function KanbanBoardContainer({
                   ))
                 )}
               </div>
+            </div>
+
+            {/* TASK COMMENTS ENGINE INJECTION */}
+            <div className="mt-2">
+              <TaskComments 
+                taskId={activeDetailedTask.id} 
+                currentUserId={currentUserId} 
+              />
             </div>
 
           </div>

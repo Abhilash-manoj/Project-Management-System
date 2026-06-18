@@ -1,7 +1,6 @@
 // app/join/[token]/page.tsx
 import React from "react";
 import { prisma } from "@/lib/db";
-import { acceptJoinLinkOnboarding } from "../../actions";
 import LinkOnboardingFormWrapper from "./components/LinkOnboardingFormWrapper";
 import Link from "next/link";
 import { ShieldAlert, Link2 } from "lucide-react"; // Vector standard icons
@@ -27,7 +26,7 @@ export default async function BulkJoinLinkPage({ params }: JoinPageProps) {
       <div className="flex min-h-screen items-center justify-center bg-base-200 text-neutral p-6 font-sans antialiased">
         <div className="card w-full max-w-md p-8 text-center bg-base-100 border border-base-300 rounded-2xl space-y-4 shadow-xl items-center">
           <div className="avatar placeholder mb-2">
-            <div className="bg-error/10 text-error rounded-full h-14 w-14 border border-error/20">
+            <div className="bg-error/10 text-error rounded-full h-14 w-14 border border-error/20 flex items-center justify-center">
               <ShieldAlert className="h-6 w-6 stroke-[2.2]" />
             </div>
           </div>
@@ -71,6 +70,7 @@ export default async function BulkJoinLinkPage({ params }: JoinPageProps) {
           </p>
         </div>
 
+        {/* 🚀 CONNECTED: Calls our updated client wrapper which forces the required department name text input string parameters */}
         <LinkOnboardingFormWrapper token={token} />
       </div>
     </div>

@@ -1,12 +1,10 @@
 // app/dashboard/projects/components/ProjectsDirectoryClient.tsx
 "use client";
 
-import React, { useState, useTransition } from "react";
-import { Folder, Search, Users, Shield, ArrowUpRight } from "lucide-react";
+import React, { useState, useTransition, useEffect } from "react";
+import { Folder, Search, Users, Shield, ArrowUpRight, Plus } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-
-// 👇 IMPORT YOUR EXISTING CREATION MODAL WITH INTERNAL TRIGGER
 import CreateProjectModal from "../../components/CreateProjectModal"; 
 
 interface ProjectCardData {
@@ -24,19 +22,22 @@ interface ClientProps {
   totalTrackedLabel: number;
   currentActiveFilter: string;
   currentSearchValue: string;
+  isOwnerOrAdmin: boolean;
 }
 
 export default function ProjectsDirectoryClient({
-  initialProjects,
+  initialProjects = [], // 🚀 PREVENT CRASHES: Ensure default empty fallback array
   totalTrackedLabel,
   currentActiveFilter,
   currentSearchValue,
+  isOwnerOrAdmin,
 }: ClientProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [, startTransition] = useTransition();
 
   const [searchVal, setSearchVal] = useState(currentSearchValue);
+  const [isOpen, setIsOpen] = useState(false);
 
   const tabs = [
     { id: "ALL", label: "All" },
@@ -46,6 +47,7 @@ export default function ProjectsDirectoryClient({
     { id: "ARCHIVED", label: "Archived" },
   ];
 
+  // 🚀 SHARED NAVIGATION PARAMS COMPILER
   const updateWorkspaceQueries = (statusFilter: string, textSearch: string) => {
     const params = new URLSearchParams();
     if (statusFilter !== "ALL") params.set("status", statusFilter.toLowerCase());
@@ -56,12 +58,18 @@ export default function ProjectsDirectoryClient({
     });
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setSearchVal(newVal);
+    updateWorkspaceQueries(currentActiveFilter, newVal);
+  };
+
   const handleTabToggle = (tabId: string) => {
     updateWorkspaceQueries(tabId, searchVal);
   };
 
   const handleSearchKeystroke = (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault(); 
     updateWorkspaceQueries(currentActiveFilter, searchVal);
   };
 
@@ -88,10 +96,18 @@ export default function ProjectsDirectoryClient({
           </p>
         </div>
 
-        {/* 👇 FIXED: Placed your CreateProjectModal directly here. It will render its own style-compliant "New Project" button button natively! */}
-        <div className="shrink-0 self-start sm:self-auto">
-          <CreateProjectModal />
-        </div>
+        {isOwnerOrAdmin && (
+          <div className="shrink-0 self-start sm:self-auto animate-fade-in flex items-center">
+            <button 
+              type="button"
+              onClick={() => setIsOpen(true)}
+              className="btn btn-primary btn-sm rounded-xl font-bold text-primary-content shadow-xs cursor-pointer flex items-center gap-1.5 bg-primary"
+            >
+              <Plus className="h-4 w-4 stroke-[2.5]" /> New Project
+            </button>
+            <CreateProjectModal isOpen={isOpen} onClose={() => setIsOpen(false)} />
+          </div>
+        )}
       </div>
 
       {/* FILTER & INTERACTIVE OPERATION CONTROLS TABS BAR */}
@@ -100,7 +116,7 @@ export default function ProjectsDirectoryClient({
           <input
             type="text"
             value={searchVal}
-            onChange={(e) => setSearchVal(e.target.value)}
+            onChange={handleInputChange} 
             placeholder="Search projects by name..."
             className="input input-sm input-bordered w-full pl-9 bg-base-200 text-base-content focus:bg-base-100 focus:input-primary text-xs font-semibold rounded-xl transition-all"
           />
@@ -111,6 +127,7 @@ export default function ProjectsDirectoryClient({
         <div className="tabs tabs-boxed bg-base-200 border border-base-300/60 p-1 rounded-xl flex items-center gap-0.5 overflow-x-auto scrollbar-none">
           {tabs.map((tab) => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => handleTabToggle(tab.id)}
               className={`tab tab-sm font-black rounded-lg text-xs tracking-tight px-3.5 transition-all cursor-pointer ${

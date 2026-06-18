@@ -1,25 +1,11 @@
 // app/dashboard/projects/[projectId]/components/ProjectTabsContainer.tsx
 "use client";
 
-import React, { useState, useMemo, useActionState } from "react";
-import { 
-  LayoutDashboard, 
-  Users, 
-  Activity, 
-  Settings, 
-  BarChart3, 
-  CheckCircle2, 
-  Clock, 
-  ShieldAlert, 
-  AlertTriangle, 
-  Trash2 
-} from "lucide-react";
-import { 
-  updateProjectGeneralDetails, 
-  archiveProjectWorkspace, 
-  completePurgeProjectWorkspace 
-} from "../../../../actions";
-import AssignMemberModal from "./AssignMemberModal"; // 👈 FIXED: Imported the updated searchable combobox dropdown modal
+import React, { useState, useMemo, useActionState, useTransition } from "react";
+import { LayoutDashboard, Users, Activity, Settings, BarChart3, CheckCircle2, Clock, ShieldAlert, AlertTriangle, Trash2, UserMinus } from "lucide-react";
+import { updateProjectGeneralDetails, completePurgeProjectWorkspace } from "@/app/actions/projects"; 
+import { removeMemberFromProjectAction } from "@/app/actions/projects";
+import AssignMemberModal from "./AssignMemberModal"; 
 
 interface TabProps {
   isAuthorized: boolean;
@@ -27,14 +13,58 @@ interface TabProps {
   overview: { progress: number; totalTasks: number; completedTasks: number; memberCount: number; recentTasks: any[] };
   members: any[];
   activity: any[];
-  settings: { id: string; name: string; description: string; visibility: string };
+  settings: { id: string; name: string; description: string; visibility: string; organizationId?: string; creatorId?: string };
+  currentUserId: string; 
+  currentUserOrgRole: "OWNER" | "ADMIN" | "EMPLOYEE" | "GUEST"; 
 }
 
-export default function ProjectTabsContainer({ isAuthorized, canMutate, overview, members, activity, settings }: TabProps) {
+export default function ProjectTabsContainer({ 
+  isAuthorized, 
+  canMutate, 
+  overview, 
+  members, 
+  activity, 
+  settings, 
+  currentUserId,
+  currentUserOrgRole 
+}: TabProps) {
   const [activeTab, setActiveTab] = useState<"OVERVIEW" | "MEMBERS" | "ACTIVITY" | "SETTINGS">("OVERVIEW");
-  
-  // 👇 FIXED: State flag to handle open/close states for the searchable member allocation dropdown panel
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [isEvicting, startEvictionTransition] = useTransition();
+
+  // ==========================================================================
+  // PERMISSION EVALUATORS: ENFORCING PER-USER RULE CONSTRAINTS
+  // ==========================================================================
+  const hasAdministrativeClearance = useMemo(() => {
+    if (currentUserOrgRole === "OWNER") return true;
+
+    const isProjectCreator = settings.creatorId === currentUserId;
+    const isProjectMember = members.some(m => (m.userId || m.id) === currentUserId);
+
+    if (currentUserOrgRole === "ADMIN") {
+      return isProjectCreator || isProjectMember;
+    }
+    return false;
+  }, [members, currentUserId, settings.creatorId, currentUserOrgRole]);
+
+  // Handler loop to remove a participant completely from the project track
+  const handleRemoveMemberClick = (targetId: string, targetName: string) => {
+    const confirmation = confirm(`PROJECT MANAGEMENT ACTION:\n\nAre you sure you want to permanently remove ${targetName} from this project roster?`);
+    if (!confirmation) return;
+
+    startEvictionTransition(async () => {
+      const res = await removeMemberFromProjectAction({
+        projectId: settings.id,
+        targetUserId: targetId,
+      });
+
+      if (res?.error) {
+        alert(`Eviction Blocked: ${res.error}`);
+      } else {
+        window.location.reload();
+      }
+    });
+  };
 
   // ==========================================================================
   // CORE FORM ACTION HOOKS
@@ -45,11 +75,6 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
       return res || { error: null, success: true };
     },
     { error: null, success: false }
-  );
-
-  const [arcState, arcAction, arcPending] = useActionState(
-    async () => await archiveProjectWorkspace(settings.id),
-    { error: null }
   );
 
   const [delState, delAction, delPending] = useActionState(
@@ -85,24 +110,22 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
       {/* SELECTION NAVIGATION TABS PANEL */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-base-300 pb-4">
         <div className="tabs tabs-boxed bg-base-100 border border-base-300 p-1 w-fit rounded-xl select-none">
-          <button onClick={() => setActiveTab("OVERVIEW")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "OVERVIEW" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
+          <button type="button" onClick={() => setActiveTab("OVERVIEW")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "OVERVIEW" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <LayoutDashboard className="h-4 w-4" /> Overview
           </button>
-          <button onClick={() => setActiveTab("MEMBERS")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "MEMBERS" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
+          <button type="button" onClick={() => setActiveTab("MEMBERS")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "MEMBERS" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <Users className="h-4 w-4" /> Members
           </button>
-          <button onClick={() => setActiveTab("ACTIVITY")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "ACTIVITY" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
+          <button type="button" onClick={() => setActiveTab("ACTIVITY")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "ACTIVITY" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <Activity className="h-4 w-4" /> Activity
           </button>
-          <button onClick={() => setActiveTab("SETTINGS")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "SETTINGS" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
+          <button type="button" onClick={() => setActiveTab("SETTINGS")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "SETTINGS" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <Settings className="h-4 w-4" /> Settings
           </button>
         </div>
       </div>
 
-      {/* ==========================================================================
-          SUB-TAB 1: OVERVIEW METRICS DASHBOARD VIEW
-          ========================================================================== */}
+      {/* OVERVIEW METRICS DASHBOARD VIEW */}
       {activeTab === "OVERVIEW" && (
         <div className="space-y-6 animate-fade-in">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -121,7 +144,7 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
             <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl shadow-xs flex flex-row items-center gap-4">
               <div className="p-3 bg-warning/10 rounded-xl text-warning"><Clock className="h-5 w-5 stroke-[2.2]" /></div>
               <div>
-                <p className="text-2xl font-black tracking-tight capitalize">{settings.visibility === "ARCHIVED" ? "Archived" : "Active"}</p>
+                <p className="text-2xl font-black tracking-tight capitalize">Active</p>
                 <p className="text-[11px] font-bold uppercase tracking-wide text-base-content/40">Project Status</p>
               </div>
             </div>
@@ -184,16 +207,14 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
         </div>
       )}
 
-      {/* ==========================================================================
-          SUB-TAB 2: MEMBER LIST REGISTRY VIEW
-          ========================================================================== */}
+      {/* MEMBER LIST REGISTRY VIEW */}
       {activeTab === "MEMBERS" && (
         <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 animate-fade-in">
           <div className="flex items-center justify-between">
             <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">{members.length} Members</h3>
-            {/* 👇 FIXED: Linked onClick portal bridge to deploy the user combox search allocation modal */}
-            {canMutate && (
+            {canMutate && hasAdministrativeClearance && (
               <button 
+                type="button"
                 onClick={() => setIsAssignModalOpen(true)}
                 className="btn btn-primary btn-sm rounded-xl font-bold text-primary-content shadow-xs cursor-pointer"
               >
@@ -209,29 +230,61 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
                   <th className="py-3 px-4">Role</th>
                   <th className="py-3 px-4">Department</th>
                   <th className="py-3 px-4">Status</th>
+                  {hasAdministrativeClearance && <th className="py-3 px-4 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-base-300/60 text-xs font-medium">
-                {members.map((m, idx) => (
-                  <tr key={idx} className="hover:bg-base-200/40 transition-colors">
-                    <td className="py-3 px-4 flex items-center gap-3">
-                      <div className="avatar placeholder"><div className="h-8 w-8 bg-primary/10 border border-primary/20 text-primary font-black text-2xs rounded-full flex items-center justify-center"><span>{m.name.charAt(0)}</span></div></div>
-                      <div><p className="font-bold">{m.name}</p><p className="text-[11px] text-base-content/40 font-normal">{m.email}</p></div>
-                    </td>
-                    <td className="py-3 px-4"><span className="badge badge-primary badge-sm font-bold uppercase px-1.5 rounded">{m.role}</span></td>
-                    <td className="py-3 px-4 text-base-content/60">{m.department}</td>
-                    <td className="py-3 px-4"><span className="badge badge-success bg-success/10 border-success/20 text-success-content badge-xs font-bold rounded px-1 flex items-center gap-1">● {m.status}</span></td>
-                  </tr>
-                ))}
+                {members.map((m, idx) => {
+                  const mName = m.name || m.user?.name || "User";
+                  const mEmail = m.email || m.user?.email || "";
+                  const mId = m.userId || m.id; 
+                  
+                  const isSelf = mId === currentUserId;
+
+                  return (
+                    <tr key={idx} className="hover:bg-base-200/40 transition-colors">
+                      <td className="py-3 px-4 flex items-center gap-3">
+                        <div className="avatar placeholder"><div className="h-8 w-8 bg-primary/10 border border-primary/20 text-primary font-black text-2xs rounded-full flex items-center justify-center"><span>{mName.charAt(0)}</span></div></div>
+                        <div><p className="font-bold">{mName}</p><p className="text-[11px] text-base-content/40 font-normal">{mEmail}</p></div>
+                      </td>
+                      <td className="py-3 px-4"><span className="badge badge-primary badge-sm font-bold uppercase px-1.5 rounded">{m.role}</span></td>
+                      
+                      {/* 🚀 FIXED: Dynamic lookup reads plain string value or fallback string cleanly */}
+                      <td className="py-3 px-4 font-bold text-base-content/70">
+                        {m.department && m.department.trim() !== "" ? (
+                          m.department
+                        ) : (
+                          <span className="italic text-base-content/30 font-medium opacity-40">Unassigned</span>
+                        )}
+                      </td>
+                      
+                      <td className="py-3 px-4"><span className="badge badge-success bg-success/10 border-success/20 text-success-content badge-xs font-bold rounded px-1 flex items-center gap-1">● {m.status || "Active"}</span></td>
+                      
+                      {hasAdministrativeClearance && (
+                        <td className="py-3 px-4 text-right">
+                          {!isSelf && (
+                            <button
+                              type="button"
+                              disabled={isEvicting}
+                              onClick={() => handleRemoveMemberClick(mId, mName)}
+                              className="btn btn-ghost btn-xs btn-circle text-neutral/40 hover:text-error hover:bg-error/5 rounded-lg cursor-pointer transition-colors"
+                              title={`Remove ${mName} from Project`}
+                            >
+                              <UserMinus className="h-4 w-4" />
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* ==========================================================================
-          SUB-TAB 3: TIMELINE ACTIVITY FEED CONTAINER
-          ========================================================================== */}
+      {/* TIMELINE ACTIVITY FEED CONTAINER */}
       {activeTab === "ACTIVITY" && (
         <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 animate-fade-in">
           <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">Activity Log Timeline Feed</h3>
@@ -255,14 +308,11 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
         </div>
       )}
 
-      {/* ==========================================================================
-          SUB-TAB 4: ROLE-GATED ADMINISTRATIVE SETTINGS PANEL
-          ========================================================================== */}
+      {/* ROLE-GATED ADMINISTRATIVE SETTINGS PANEL */}
       {activeTab === "SETTINGS" && (
         <div className="space-y-6 animate-fade-in">
           {isAuthorized ? (
             <>
-              {/* General Project Parameters Form Block */}
               <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4">
                 <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">General Properties</h3>
                 
@@ -304,7 +354,6 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
                 </form>
               </div>
 
-              {/* Danger Zone Controls Section Container */}
               {canMutate ? (
                 <div className="card bg-base-100 border border-error/30 shadow-xs p-6 space-y-4">
                   <div className="flex items-center gap-2 text-error">
@@ -313,33 +362,8 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
                   </div>
 
                   <div className="border border-error/20 bg-error/5 rounded-xl divide-y divide-error/10 overflow-hidden text-xs font-medium">
-                    
-                    {/* ARCHIVE TRIGGER FORM */}
-                    <form action={arcAction} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-base-content">Archive Project Workspace</p>
-                        <p className="text-[11px] text-base-content/50 font-normal">Places this workspace context parameter track layer into read-only cold storage states.</p>
-                        {arcState?.error && <p className="text-2xs text-error font-bold mt-1">⚠️ {arcState.error}</p>}
-                      </div>
-                      <button type="submit" disabled={arcPending} className="btn btn-outline btn-error btn-sm rounded-xl font-bold min-w-[130px] cursor-pointer">
-                        {arcPending ? <span className="loading loading-spinner loading-xs"></span> : "Archive Project"}
-                      </button>
-                    </form>
-
-                    {/* TRANSFER OWNERSHIP EMBED SLOT */}
-                    <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-base-content">Transfer Administrative Ownership</p>
-                        <p className="text-[11px] text-base-content/50 font-normal">Re-assign complete administrative root-clearance parameters to a chosen team colleague.</p>
-                      </div>
-                      <button type="button" className="btn btn-outline btn-error btn-sm rounded-xl font-bold min-w-[130px] cursor-pointer">
-                        Transfer Ownership
-                      </button>
-                    </div>
-
-                    {/* DESTRUCTION TERMINAL PURGE FORM */}
                     <form action={delAction} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
+                      <div className="text-left">
                         <p className="font-bold text-error">Permanently Purge Project Branch</p>
                         <p className="text-[11px] text-base-content/50 font-normal">Irreversibly purges this entire project scope framework, including all historical tasks parameters.</p>
                         {delState?.error && <p className="text-2xs text-error font-bold mt-1">⚠️ {delState.error}</p>}
@@ -348,7 +372,6 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
                         {delPending ? <span className="loading loading-spinner loading-xs"></span> : <><Trash2 className="h-3.5 w-3.5" />Delete Project</>}
                       </button>
                     </form>
-
                   </div>
                 </div>
               ) : (
@@ -374,9 +397,6 @@ export default function ProjectTabsContainer({ isAuthorized, canMutate, overview
         </div>
       )}
 
-      {/* ========================================================================== */}
-      {/* 👇 FIXED: MOUNTED SEARCHABLE COMBOBOX OVERLAY TERMINAL PORTAL AT BASE */}
-      {/* ========================================================================== */}
       {isAssignModalOpen && (
         <AssignMemberModal 
           projectId={settings.id} 
