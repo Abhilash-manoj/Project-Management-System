@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useActionState, useEffect, useTransition } from "react";
-import { X, ShieldAlert, CheckSquare, Calendar } from "lucide-react";
+import { X, ShieldAlert, CheckSquare, Calendar, Layers } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createTask } from "@/app/actions/tasks"; 
 
@@ -16,6 +16,7 @@ interface ModalProps {
   teamMembers: MemberOption[];
   onClose: () => void;
   parentId?: string | null; 
+  boardColumns: string[]; // 🚀 NEW: Prop array declared to enable custom workflow lane injection
 }
 
 interface FormStateShape {
@@ -27,10 +28,11 @@ export default function AddTaskModalDialog({
   projectId, 
   teamMembers, 
   onClose, 
-  parentId = null 
+  parentId = null,
+  boardColumns
 }: ModalProps) {
   const router = useRouter();
-  const [isRefreshing, startRefreshTransition] = useTransition(); // 👈 Added navigation transition lock
+  const [isRefreshing, startRefreshTransition] = useTransition(); 
 
   const [formState, formAction, isPending] = useActionState(
     async (prevState: FormStateShape, formData: FormData): Promise<FormStateShape> => {
@@ -45,27 +47,21 @@ export default function AddTaskModalDialog({
     { error: null, success: false }
   );
 
-  // ==========================================================================
-  // ⚡ FIXED: DATA WORKFLOW SYNCHRONIZATION PASS
-  // ==========================================================================
+  // DATA WORKFLOW SYNCHRONIZATION PASS
   useEffect(() => {
     if (formState?.success) {
-      // Wrap refresh inside a transition context lock so React knows to wait for it
       startRefreshTransition(() => {
         router.refresh();
       });
     }
   }, [formState?.success, router]);
 
-  // Once the server returns fresh data AND our refresh transition completes, shut down safely
   useEffect(() => {
     if (formState?.success && !isRefreshing) {
       onClose();
     }
   }, [formState?.success, isRefreshing, onClose]);
-  // ==========================================================================
 
-  // Combine both pending states to keep form inputs locked down securely during operation loops
   const working = isPending || isRefreshing;
 
   return (
@@ -134,6 +130,30 @@ export default function AddTaskModalDialog({
               className="textarea textarea-bordered w-full bg-base-200 text-neutral focus:bg-base-100 focus:textarea-primary text-xs font-semibold rounded-xl resize-none leading-relaxed transition-all disabled:opacity-60" 
             />
           </div>
+
+          {/* 🚀 NEW: STARTING PIPELINE STAGE INPUT ENGINE */}
+          {/* Only rendered for primary master cards since subtasks inherit flow states */}
+          {!parentId && (
+            <div>
+              <label className="label py-1">
+                <span className="label-text text-[10px] font-bold text-neutral/50 uppercase tracking-wider flex items-center gap-1">
+                  <Layers className="h-3 w-3 text-neutral/40" /> Target Workflow Starting Lane
+                </span>
+              </label>
+              <select 
+                name="status" 
+                disabled={working} 
+                defaultValue={boardColumns[0]}
+                className="select select-sm select-bordered w-full bg-base-200 text-neutral focus:select-primary text-xs font-bold rounded-xl transition-all disabled:opacity-60"
+              >
+                {boardColumns.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {stage.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

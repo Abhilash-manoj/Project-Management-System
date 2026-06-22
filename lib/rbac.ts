@@ -33,12 +33,18 @@ export async function verifyProjectAccess(projectId?: string | null) {
 
   // 🏢 CONTEXT A: Global Creation Pipeline Check (No target projectId passed)
   if (!projectId) {
+    // Admins can create global projects; Employees and Guests are strictly blocked
     if (role === "ADMIN") {
       return { authorized: true, error: null, session, role };
     }
+    
+    const contextErrorMessage = role === "GUEST"
+      ? "Security Exception: Sandboxed guest accounts are restricted from generating workspace pipelines."
+      : "Security Exception: Insufficient workspace administrative clearance.";
+
     return { 
       authorized: false, 
-      error: "Security Exception: Insufficient workspace administrative clearance.", 
+      error: contextErrorMessage, 
       session, 
       role 
     };
@@ -46,12 +52,13 @@ export async function verifyProjectAccess(projectId?: string | null) {
 
   // 🛡️ CONTEXT B: Attribute-Based Project Mutation Access Checks (projectId exists)
   
-  // Check Parameter 1: Verify if the user created the project scope branch
+  // Check Parameter 1: Verify if the user created the project scope branch 
+  // (Note: Guests can never create projects, but this safely covers Admin/Employee paths)
   const project = await prisma.project.findFirst({
     where: { id: projectId, creatorId: session.userId }
   });
 
-  if (project) {
+  if (project && role !== "GUEST") {
     return { authorized: true, error: null, session, role };
   }
 
@@ -70,9 +77,13 @@ export async function verifyProjectAccess(projectId?: string | null) {
   }
 
   // ⛔ BLOCKED: User does not maintain structural context linkages to this project block
-  const violationMessage = role === "ADMIN"
-    ? "Access Denied: Admins can only perform actions in projects they created or are assigned to as team members."
-    : "Security Exception: Boundary lock violation. Insufficient project team clearance.";
+  let violationMessage = "Security Exception: Boundary lock violation. Insufficient project team clearance.";
+  
+  if (role === "ADMIN") {
+    violationMessage = "Access Denied: Admins can only perform actions in projects they created or are assigned to as team members.";
+  } else if (role === "GUEST") {
+    violationMessage = "Access Gated: Sandboxed guest profiles must be explicitly assigned to this project team roster.";
+  }
 
   return { 
     authorized: false, 

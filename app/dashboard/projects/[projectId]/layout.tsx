@@ -3,7 +3,7 @@ import React from "react";
 import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect, notFound } from "next/navigation";
-import { Kanban, Plus, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import ProjectHeaderActionToolbar from "./components/ProjectHeaderActionToolbar";
 
@@ -44,6 +44,16 @@ export default async function ProjectDetailLayout({ children, params }: LayoutPr
   const serializedTeam = teamAssignments.map(a => ({ id: a.user.id, name: a.user.name }));
   const initials = project.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
 
+  // 🚀 NEW: Fetch custom workflow column stages to feed into the modal selector
+  const customColumns = await prisma.boardColumn.findMany({
+    where: { projectId },
+    orderBy: { position: "asc" },
+  });
+
+  const activeStages = customColumns.length > 0 
+    ? customColumns.map((c) => c.name) 
+    : ["TODO", "IN_PROGRESS", "DONE"];
+
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto font-sans text-neutral animate-fade-in">
       
@@ -78,7 +88,11 @@ export default async function ProjectDetailLayout({ children, params }: LayoutPr
         </div>
 
         {/* FUNCTIONAL BUTTONS TOOLBAR COMPONENT CONTAINER */}
-        <ProjectHeaderActionToolbar projectId={projectId} teamMembers={serializedTeam} />
+        <ProjectHeaderActionToolbar 
+          projectId={projectId} 
+          teamMembers={serializedTeam}  
+          boardColumns={activeStages} // 🚀 FIXED: Injected the workflow lanes prop here safely
+        />
       </div>
 
       {/* SUB-PANEL MAIN CONTENT VIEWPORT ROW */}

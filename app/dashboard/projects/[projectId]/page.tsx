@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import ProjectTabsContainer from "./components/ProjectTabsContainer";
+import { verifyProjectAccess } from "@/lib/rbac"; 
 
 export const dynamic = "force-dynamic"; // Ensure cache resets live on every page bounce
 
@@ -16,6 +17,12 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   if (!session) redirect("/signin");
 
   const { projectId } = await params;
+
+  // 1. 🛡️ SECURITY PERIMETER CHECK: Validate project-level contextual clearances
+  const guard = await verifyProjectAccess(projectId);
+  if (!guard.authorized) {
+    redirect("/dashboard");
+  }
 
   // Query the authenticated user's organization-wide workspace membership profile
   const currentMembership = await prisma.membership.findFirst({
@@ -70,7 +77,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
             where: { organizationId: currentMembership.organizationId },
             select: { 
               role: true,
-              department: true // 🚀 FIXED: Dynamic lookup reads plain string value or fallback string cleanly
+              department: true 
             }
           }
         } 
@@ -78,6 +85,69 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     },
   });
 
+  // Explicit string conversion and default fallbacks to satisfy strict prop signatures
+  const serializedMembers = projectAssignments.map(a => ({
+    id: String(a.user.id || ""),
+    name: String(a.user.name || "Unknown Teammate")
+  }));
+
+  // ==========================================================================
+  // 📊 FETCH LAYOUT PARAMETERS FOR THE INTEGRATED KANBAN TAB
+  // ==========================================================================
+  const customColumns = await prisma.boardColumn.findMany({
+    where: { projectId },
+    orderBy: { position: "asc" },
+  });
+
+  const activeStages = customColumns.length > 0 
+    ? customColumns.map((c) => c.name) 
+    : ["TODO", "IN_PROGRESS", "DONE"];
+
+  const fallbackLaneName = activeStages[0];
+
+  const allKanbanTasks = await prisma.task.findMany({
+    where: { 
+      projectId,
+      parentId: null 
+    },
+    orderBy: { createdAt: "asc" },
+    include: {
+      assignee: { select: { name: true } },
+      subTasks: {
+        orderBy: { createdAt: "asc" },
+        include: {
+          assignee: { select: { name: true } }
+        }
+      }
+    }
+  });
+
+  // Run server side cascading task migration mapping
+  const normalizedKanbanTasks = allKanbanTasks.map((task) => {
+    let targetedStatus = task.status;
+
+    if (!activeStages.includes(task.status)) {
+      if (task.status === "IN_PROGRESS" && activeStages.includes("IN_DEVELOPMENT")) {
+        targetedStatus = "IN_DEVELOPMENT";
+      } else if (task.status === "REVIEW" && activeStages.includes("QA_TESTING")) {
+        targetedStatus = "QA_TESTING";
+      } else {
+        targetedStatus = fallbackLaneName;
+      }
+    }
+
+    return {
+      ...task,
+      status: targetedStatus,
+      priority: (task.priority === "URGENT" ? "CRITICAL" : task.priority) as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      subTasks: task.subTasks.map((sub) => ({
+        ...sub,
+        status: sub.status
+      }))
+    };
+  });
+
+  // ==========================================================================
   const parentTrackTasks = await prisma.task.findMany({
     where: { projectId, parentId: null },
     take: 4,
@@ -113,12 +183,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   const isCreator = projectData.creatorId === session.userId;
   const isAssigned = projectAssignments.some(a => a.userId === session.userId);
 
-  // Gated URL direct breach attempts. Kick out unassigned employees/guests on private setups.
   if (projectData.visibility === "PRIVATE" && !isGlobalOwner && !isGlobalAdmin && !isAssigned) {
     redirect("/dashboard/projects");
   }
 
-  // Owners edit everything. Admins/Employees can ONLY edit if they are creator or assigned team members.
   const canMutate = isGlobalOwner || isCreator || isAssigned;
   // ==========================================================================
 
@@ -136,18 +204,18 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       members={projectAssignments.map((a) => {
         const orgMembership = a.user.memberships[0];
         const computedRole = orgMembership?.role || "EMPLOYEE";
-        const computedDept = orgMembership?.department || ""; // 🚀 FIXED: Forward the database text property directly
+        const computedDept = orgMembership?.department || "";
 
         return {
           id: a.user.id,
           name: a.user.name,
           email: a.user.email,
           role: computedRole, 
-          department: computedDept, // 🚀 FIXED: Replaced static "Engineering" string with live data link token
+          department: computedDept, 
           status: "Active",
         };
       })}
-      activity={serializedActivityLogs}
+      activity={serializedActivityLogs} // 🚀 FIXED: Cleared duplicate syntax object initialization literal
       settings={{
         id: projectData.id,
         name: projectData.name,
@@ -158,6 +226,9 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       }}
       currentUserId={session.userId} 
       currentUserOrgRole={currentMembership.role} 
+      kanbanTasks={JSON.parse(JSON.stringify(normalizedKanbanTasks))}
+      boardColumns={activeStages}
+      serializedMembers={serializedMembers}
     />
   );
 }

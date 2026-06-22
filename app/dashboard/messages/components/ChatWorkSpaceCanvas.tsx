@@ -1,12 +1,15 @@
-// app/dashboard/messages/components/ChatWorkSpaceCanvas.tsx
+// app/dashboard/messages/components/ChatWorkspaceCanvas.tsx
 "use client";
 
 import React, { useState, useEffect, useRef, useTransition } from 'react';
-import { getUserConversations, sendMessage, getOrCreatePrivateChat, deleteMessageAction } from '@/app/actions/communication';
+import { getUserConversations, sendMessage, getOrCreatePrivateChat, deleteMessageAction, getCompanyDirectory } from '@/app/actions/communication';
 import { getConversationMessages } from '@/app/actions/communication';
 import { searchCompanyDirectory, getMembershipRoleAction } from '@/app/actions/directory'; 
 import CreateGroupModal from "./CreateGroupModal";
+import GroupInfoSidebar from "./GroupInfoSidebar"; 
 import PusherClient from 'pusher-js';
+import { MentionsInput, Mention } from 'react-mentions'; 
+import { Info } from 'lucide-react'; 
 
 interface ChatWorkspaceCanvasProps {
   currentUserId: string;
@@ -25,6 +28,7 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
   
   const [userRole, setUserRole] = useState<string>("EMPLOYEE");
   const [groupModalOpen, setGroupModalOpen] = useState<boolean>(false);
+  const [showGroupSidebar, setShowGroupSidebar] = useState<boolean>(false); 
 
   const [isPending, startTransition] = useTransition();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -57,21 +61,22 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
         setUserRole(result.role);
       }
     }
+    
     resolveActiveWorkspacePermissions();
   }, [currentUserId, organizationId]);
 
-  // Handle clearing unread badges when clicking into an active chat tab
+  // Handle clearing unread badges and fetching chat history
   useEffect(() => {
     if (!activeChatId) return;
-
-    setConversations(prev => prev.map(chat => 
-      chat.id === activeChatId ? { ...chat, unreadCount: 0 } : chat
-    ));
 
     async function loadActiveChannelMessages() {
       try {
         const fullHistory = await getConversationMessages(activeChatId, currentUserId);
         setActiveChatMessages(fullHistory);
+
+        setConversations(prev => prev.map(chat => 
+          chat.id === activeChatId && chat.unreadCount > 0 ? { ...chat, unreadCount: 0 } : chat
+        ));
       } catch (err) {
         console.error("Failed to load historical database logs:", err);
       }
@@ -80,14 +85,21 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     loadActiveChannelMessages();
   }, [activeChatId, currentUserId]);
 
-  // Establish Real-Time Global Network Event Listeners
+  // 🚀 FIXED: Leak-proof Pusher sync event block. 
+  // It unbinds and kills active connection pools when dependencies switch or tabs unmount.
   useEffect(() => {
+    if (conversations.length === 0) return;
+
     const pusher = new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY || "", {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "",
     });
 
+    const activeSubscriptions: string[] = [];
+
     conversations.forEach(chat => {
-      const channel = pusher.subscribe(`chat-${chat.id}`);
+      const targetChannel = `chat-${chat.id}`;
+      const channel = pusher.subscribe(targetChannel);
+      activeSubscriptions.push(targetChannel);
       
       // Live message insertion handler
       channel.bind("new-message", (incomingMessage: any) => {
@@ -117,7 +129,7 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
         });
       });
 
-      // 🚀 NEW: Live dynamic deletion handler stream listener
+      // Live dynamic deletion handler stream listener
       channel.bind("message-deleted", (data: { messageId: string }) => {
         if (chat.id === activeChatId) {
           setActiveChatMessages((prev) => prev.filter(msg => msg.id !== data.messageId));
@@ -126,18 +138,19 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
       });
     });
 
+    // 🚀 CRITICAL CLEANUP ENGINE ROUTINE
     return () => {
-      conversations.forEach(chat => {
-        pusher.unsubscribe(`chat-${chat.id}`);
+      activeSubscriptions.forEach(channelName => {
+        pusher.unsubscribe(channelName);
       });
+      pusher.disconnect(); // Explicitly close the WebSocket thread right away
     };
-  }, [conversations, activeChatId, currentUserId]);
+  }, [conversations.map(c => c.id).join(','), activeChatId, currentUserId]); // String serialized tracking layout
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChatMessages]);
 
-  // 🚀 FIXED: Re-wired missing user selection handler configuration
   const handleSelectUserToChat = async (targetUserId: string) => {
     setSearchQuery('');
     setDropdownOpen(false);
@@ -178,7 +191,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     });
   };
 
-  // 🚀 NEW: Trigger backend server action to delete selected message securely
   const handleMessageDeletion = async (messageId: string) => {
     setActiveChatMessages(prev => prev.filter(m => m.id !== messageId));
 
@@ -228,16 +240,65 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     return () => document.removeEventListener("mousedown", clickBoundaryCheck);
   }, []);
 
+  // REGEX PARSER AND RENDERER FOR CHAT BUBBLES
+  const renderMessageContentWithHighlights = (textBody: string, isMe: boolean) => {
+    if (!textBody) return "";
+    const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+    const segments = [];
+    let lastCursor = 0;
+    let matchItem;
+
+    while ((matchItem = mentionRegex.exec(textBody)) !== null) {
+      const [fullMatch, displayName, userId] = matchItem;
+      const matchIndex = matchItem.index;
+
+      if (matchIndex > lastCursor) {
+        segments.push(textBody.substring(lastCursor, matchIndex));
+      }
+
+      segments.push(
+        <span 
+          key={`${userId}-${matchIndex}`} 
+          className={`font-bold px-1 rounded select-all ${
+            isMe 
+              ? 'text-white bg-white/20' 
+              : 'text-primary bg-primary/10'
+          }`}
+        >
+          @{displayName}
+        </span>
+      );
+      lastCursor = mentionRegex.lastIndex;
+    }
+
+    if (lastCursor < textBody.length) {
+      segments.push(textBody.substring(lastCursor));
+    }
+
+    return segments.length > 0 ? segments : textBody;
+  };
+
+  const cleanPreviewText = (text: string) => {
+    if (!text) return "No messages yet";
+    return text.replace(/@\[([^\]]+)\]\(([^)]+)\)/g, '@$1');
+  };
+
   const currentChat = conversations.find(c => c.id === activeChatId);
   const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '??';
-  
   const sortedConversations = [...conversations].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
   const directMessages = sortedConversations.filter(c => !c.isGroup);
   const groupChannels = sortedConversations.filter(c => c.isGroup);
 
+  const activeDirectoryMembers = currentChat && currentChat.participants
+    ? currentChat.participants.map((p: any) => ({
+        id: p.user.id,
+        display: p.user.name,
+      }))
+    : [];
+
   return (
-    <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden border border-base-300 bg-base-100 text-base-content rounded-box">
+    <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden border border-base-300 bg-base-100 text-base-content rounded-box text-left">
       
       {/* Sidebar Controls */}
       <aside className="w-80 border-r border-base-300 flex flex-col bg-base-200/30">
@@ -289,7 +350,9 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                     </div>
                     <div className="flex-1 min-w-0 pr-6">
                       <div className="text-xs font-semibold truncate">{peer?.name || 'Team Member'}</div>
-                      <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>{chat.messages?.[0]?.body || 'No messages yet'}</p>
+                      <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
+                        {cleanPreviewText(chat.messages?.[0]?.body)}
+                      </p>
                     </div>
                     
                     {chat.unreadCount > 0 && (
@@ -319,7 +382,9 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                       </div>
                       <div className="flex-1 min-w-0 pr-6">
                         <div className="text-xs font-semibold truncate">{chat.name || "Unnamed Channel"}</div>
-                        <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>{chat.messages?.[0]?.body || 'No messages yet'}</p>
+                        <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
+                          {cleanPreviewText(chat.messages?.[0]?.body)}
+                        </p>
                       </div>
 
                       {chat.unreadCount > 0 && (
@@ -340,14 +405,26 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
       <main className="flex-1 flex flex-col bg-base-100">
         {currentChat ? (
           <>
-            <div className="p-4 border-b border-base-300 bg-base-100 flex items-center gap-3 shadow-sm z-10">
-              <div className="avatar placeholder">
-                <div className="bg-neutral text-neutral-content rounded-full w-9 h-9 text-xs flex items-center justify-center"><span>{currentChat.isGroup ? '#' : getInitials(currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name)}</span></div>
+            <div className="p-4 border-b border-base-300 bg-base-100 flex items-center justify-between shadow-sm z-10">
+              <div className="flex items-center gap-3">
+                <div className="avatar placeholder">
+                  <div className="bg-neutral text-neutral-content rounded-full w-9 h-9 text-xs flex items-center justify-center"><span>{currentChat.isGroup ? '#' : getInitials(currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name)}</span></div>
+                </div>
+                <div>
+                  <span className="font-bold text-base text-base-content block leading-none">{currentChat.isGroup ? currentChat.name : currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name}</span>
+                  <span className="text-[10px] opacity-50 mt-1 block">Active now</span>
+                </div>
               </div>
-              <div>
-                <span className="font-bold text-base text-base-content block leading-none">{currentChat.isGroup ? currentChat.name : currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name}</span>
-                <span className="text-[10px] opacity-50 mt-1 block">Active now</span>
-              </div>
+
+              {currentChat.isGroup && (
+                <button 
+                  onClick={() => setShowGroupSidebar(!showGroupSidebar)}
+                  className={`btn btn-ghost btn-sm rounded-xl px-2 h-9 border border-transparent ${showGroupSidebar ? 'bg-base-300 text-primary border-base-300' : ''}`}
+                  title="Toggle channel participant card drawer"
+                >
+                  <Info className="h-4 w-4 stroke-[2.2]" />
+                </button>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-base-200/10">
@@ -364,7 +441,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                     <div className="chat-header text-[11px] opacity-50 mb-1 px-1">{isMe ? 'You' : (msg.sender?.name || 'Team Member')}</div>
                     
                     <div className="relative flex items-center gap-2">
-                      {/* 🚀 FIXED: Subtle moderation delete action button overlay controls */}
                       {!msg.id.startsWith("temp-") && canDelete && (
                         <button
                           onClick={() => handleMessageDeletion(msg.id)}
@@ -377,7 +453,11 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                         </button>
                       )}
                       
-                      <div className={`chat-bubble text-xs max-w-md ${isMe ? 'bg-primary text-primary-content' : 'bg-base-200 text-base-content'}`}>{msg.body}</div>
+                      <div className={`chat-bubble text-xs max-w-md leading-relaxed whitespace-pre-wrap ${
+                        isMe ? 'bg-primary text-white font-medium' : 'bg-base-200 text-base-content'
+                      }`}>
+                        {renderMessageContentWithHighlights(msg.body, isMe)} 
+                      </div>
                     </div>
                   </div>
                 );
@@ -385,10 +465,87 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
               <div ref={scrollRef} />
             </div>
 
-            <footer className="p-3 border-t border-base-300 bg-base-100">
-              <form className="flex gap-2 items-center" onSubmit={handleMessageDispatch}>
-                <input type="text" value={messageText} onChange={(e) => setMessageText(e.target.value)} disabled={isPending} placeholder="Type secure company message text..." className="input input-bordered flex-1 bg-base-100 text-sm focus:outline-primary" />
-                <button type="submit" disabled={isPending || !messageText.trim()} className="btn btn-primary btn-sm h-10 px-5">Send</button>
+            {/* Custom Auto-complete Input Controller Panel Bar */}
+            <footer className="p-3 border-t border-base-300 bg-base-100 font-sans">
+              <form className="flex gap-2 items-end" onSubmit={handleMessageDispatch}>
+                <div className="flex-1 bg-base-200 rounded-xl px-3 py-2 text-xs font-semibold focus-within:ring-2 focus-within:ring-primary focus-within:bg-base-100 transition-all text-left relative max-w-5xl">
+                  <MentionsInput
+                    value={messageText}
+                    onChange={(e, newValue) => setMessageText(newValue)}
+                    disabled={isPending}
+                    placeholder="Type a message, use @ to mention someone..."
+                    a11ySuggestionsListLabel="Suggested teammates for mention"
+                    className="w-full text-xs font-semibold outline-none bg-transparent"
+                    style={{
+                      control: {
+                        fontSize: 12,
+                        lineHeight: '20px',
+                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                        minHeight: '20px',
+                      },
+                      input: {
+                        margin: 0,
+                        padding: 0,
+                        border: '0px solid transparent',
+                        outline: 'none',
+                        fontSize: 12,
+                        lineHeight: '20px',
+                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                      },
+                      highlighter: {
+                        margin: 0,
+                        padding: 0,
+                        border: '0px solid transparent',
+                        fontSize: 12,
+                        lineHeight: '20px',
+                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                        boxSizing: 'border-box',
+                      },
+                      suggestions: {
+                        list: {
+                          backgroundColor: 'var(--fallback-b1,oklch(var(--b1)))',
+                          border: '1px solid var(--fallback-b3,oklch(var(--b3)))',
+                          borderRadius: '0.75rem',
+                          fontSize: 12,
+                          padding: '0.25rem',
+                          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                          position: 'absolute',
+                          bottom: '100%',
+                          left: 0,
+                          marginBottom: '0.5rem',
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          zIndex: 50,
+                          minWidth: '220px',
+                        },
+                        item: {
+                          padding: '0.5rem 0.75rem',
+                          borderRadius: '0.5rem',
+                          '&focused': {
+                            backgroundColor: 'var(--fallback-p,oklch(var(--p)))',
+                            color: 'var(--fallback-pc,oklch(var(--pc)))',
+                            fontWeight: 'bold',
+                          },
+                        },
+                      },
+                    }}
+                  >
+                    <Mention
+                      trigger="@"
+                      data={activeDirectoryMembers} 
+                      markup="@[__display__](__id__)"
+                      displayTransform={(id, display) => `@${display}`} 
+                      className="text-primary font-bold bg-transparent" 
+                    />
+                  </MentionsInput>
+                </div>
+                <button 
+                  type="submit" 
+                  disabled={isPending || !messageText.trim()} 
+                  className="btn btn-primary btn-sm h-9 px-5 font-bold rounded-xl cursor-pointer shadow-xs active:scale-[0.98] transition-all shrink-0"
+                >
+                  Send
+                </button>
               </form>
             </footer>
           </>
@@ -398,6 +555,19 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
           </div>
         )}
       </main>
+
+      {currentChat && currentChat.isGroup && showGroupSidebar && (
+        <GroupInfoSidebar
+          conversation={currentChat}
+          currentUserId={currentUserId}
+          onClose={() => setShowGroupSidebar(false)}
+          onGroupModified={async () => {
+            setShowGroupSidebar(false);
+            setActiveChatId(''); 
+            await refreshWorkspaceChats(null);
+          }}
+        />
+      )}
 
       <CreateGroupModal isOpen={groupModalOpen} onClose={() => setGroupModalOpen(false)} currentUserId={currentUserId} organizationId={organizationId} onGroupCreated={async (newGroupId) => { await refreshWorkspaceChats(newGroupId); }} />
     </div>

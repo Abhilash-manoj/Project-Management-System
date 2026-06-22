@@ -2,10 +2,13 @@
 "use client";
 
 import React, { useState, useMemo, useActionState, useTransition } from "react";
-import { LayoutDashboard, Users, Activity, Settings, BarChart3, CheckCircle2, Clock, ShieldAlert, AlertTriangle, Trash2, UserMinus } from "lucide-react";
+import { LayoutDashboard, Users, Activity, Settings, BarChart3, CheckCircle2, Clock, ShieldAlert, AlertTriangle, Trash2, UserMinus, Sliders, ArrowRight, Kanban } from "lucide-react";
 import { updateProjectGeneralDetails, completePurgeProjectWorkspace } from "@/app/actions/projects"; 
 import { removeMemberFromProjectAction } from "@/app/actions/projects";
 import AssignMemberModal from "./AssignMemberModal"; 
+import KanbanBoardContainer from "./KanbanBoardContainer"; // 🚀 NEW: Import your client board engine here
+import Link from "next/link"; 
+import { useParams } from "next/navigation"; 
 
 interface TabProps {
   isAuthorized: boolean;
@@ -16,6 +19,10 @@ interface TabProps {
   settings: { id: string; name: string; description: string; visibility: string; organizationId?: string; creatorId?: string };
   currentUserId: string; 
   currentUserOrgRole: "OWNER" | "ADMIN" | "EMPLOYEE" | "GUEST"; 
+  // 🚀 NEW props: Injected from parent page database queries to drive the board view natively
+  kanbanTasks: any[];
+  boardColumns: string[];
+  serializedMembers: { id: string; name: string }[];
 }
 
 export default function ProjectTabsContainer({ 
@@ -26,15 +33,20 @@ export default function ProjectTabsContainer({
   activity, 
   settings, 
   currentUserId,
-  currentUserOrgRole 
+  currentUserOrgRole,
+  kanbanTasks,
+  boardColumns,
+  serializedMembers
 }: TabProps) {
-  const [activeTab, setActiveTab] = useState<"OVERVIEW" | "MEMBERS" | "ACTIVITY" | "SETTINGS">("OVERVIEW");
+  // 🚀 UPDATED: Appended KANBAN state mapping option down into your main component hook array
+  const [activeTab, setActiveTab] = useState<"OVERVIEW" | "KANBAN" | "MEMBERS" | "ACTIVITY" | "SETTINGS">("OVERVIEW");
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isEvicting, startEvictionTransition] = useTransition();
 
-  // ==========================================================================
-  // PERMISSION EVALUATORS: ENFORCING PER-USER RULE CONSTRAINTS
-  // ==========================================================================
+  const params = useParams();
+  const currentProjectId = (params?.projectId || settings.id) as string;
+
+  // Permission evaluator loop
   const hasAdministrativeClearance = useMemo(() => {
     if (currentUserOrgRole === "OWNER") return true;
 
@@ -47,14 +59,13 @@ export default function ProjectTabsContainer({
     return false;
   }, [members, currentUserId, settings.creatorId, currentUserOrgRole]);
 
-  // Handler loop to remove a participant completely from the project track
   const handleRemoveMemberClick = (targetId: string, targetName: string) => {
     const confirmation = confirm(`PROJECT MANAGEMENT ACTION:\n\nAre you sure you want to permanently remove ${targetName} from this project roster?`);
     if (!confirmation) return;
 
     startEvictionTransition(async () => {
       const res = await removeMemberFromProjectAction({
-        projectId: settings.id,
+        projectId: currentProjectId,
         targetUserId: targetId,
       });
 
@@ -66,12 +77,9 @@ export default function ProjectTabsContainer({
     });
   };
 
-  // ==========================================================================
-  // CORE FORM ACTION HOOKS
-  // ==========================================================================
   const [genState, genAction, genPending] = useActionState(
     async (prevState: any, formData: FormData) => {
-      const res = await updateProjectGeneralDetails(settings.id, formData);
+      const res = await updateProjectGeneralDetails(currentProjectId, formData);
       return res || { error: null, success: true };
     },
     { error: null, success: false }
@@ -80,14 +88,13 @@ export default function ProjectTabsContainer({
   const [delState, delAction, delPending] = useActionState(
     async () => {
       if (confirm("CRITICAL WARNING: Are you completely sure you want to permanently delete this project? This data cannot be recovered.")) {
-        return await completePurgeProjectWorkspace(settings.id);
+        return await completePurgeProjectWorkspace(currentProjectId);
       }
       return { error: null };
     },
     { error: null }
   );
 
-  // Computes precise proportional metric distributions for the layout chart
   const distributionMetrics = useMemo(() => {
     let todo = 0, progress = 0, done = 0;
     overview.recentTasks.forEach((t: any) => {
@@ -109,10 +116,16 @@ export default function ProjectTabsContainer({
       
       {/* SELECTION NAVIGATION TABS PANEL */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-base-300 pb-4">
-        <div className="tabs tabs-boxed bg-base-100 border border-base-300 p-1 w-fit rounded-xl select-none">
+        <div className="tabs tabs-boxed bg-base-100 border border-base-300 p-1 w-fit rounded-xl select-none flex flex-wrap gap-0.5">
           <button type="button" onClick={() => setActiveTab("OVERVIEW")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "OVERVIEW" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <LayoutDashboard className="h-4 w-4" /> Overview
           </button>
+          
+          {/* 🚀 NEW: THE EMBEDDED NESTED KANBAN TAB TRIGGER BUTTON */}
+          <button type="button" onClick={() => setActiveTab("KANBAN")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "KANBAN" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
+            <Kanban className="h-4 w-4" /> Kanban Board
+          </button>
+
           <button type="button" onClick={() => setActiveTab("MEMBERS")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "MEMBERS" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <Users className="h-4 w-4" /> Members
           </button>
@@ -125,7 +138,7 @@ export default function ProjectTabsContainer({
         </div>
       </div>
 
-      {/* OVERVIEW METRICS DASHBOARD VIEW */}
+      {/* OVERVIEW TAB */}
       {activeTab === "OVERVIEW" && (
         <div className="space-y-6 animate-fade-in">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -143,10 +156,7 @@ export default function ProjectTabsContainer({
             </div>
             <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl shadow-xs flex flex-row items-center gap-4">
               <div className="p-3 bg-warning/10 rounded-xl text-warning"><Clock className="h-5 w-5 stroke-[2.2]" /></div>
-              <div>
-                <p className="text-2xl font-black tracking-tight capitalize">Active</p>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-base-content/40">Project Status</p>
-              </div>
+              <div><p className="text-2xl font-black tracking-tight capitalize">Active</p><p className="text-[11px] font-bold uppercase tracking-wide text-base-content/40">Project Status</p></div>
             </div>
           </div>
 
@@ -207,19 +217,28 @@ export default function ProjectTabsContainer({
         </div>
       )}
 
-      {/* MEMBER LIST REGISTRY VIEW */}
+      {/* 🚀 NEW: KANBAN TAB INTERACTION COMPONENT INJECTION */}
+      {activeTab === "KANBAN" && (
+        <div className="animate-fade-in w-full">
+          <KanbanBoardContainer 
+            initialTasks={kanbanTasks}
+            projectId={currentProjectId}
+            teamMembers={serializedMembers}
+            canMutate={canMutate && currentUserOrgRole !== "GUEST"}
+            currentUserId={currentUserId}
+            currentUserRole={currentUserOrgRole}
+            boardColumns={boardColumns}
+          />
+        </div>
+      )}
+
+      {/* MEMBERS TAB */}
       {activeTab === "MEMBERS" && (
         <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 animate-fade-in">
           <div className="flex items-center justify-between">
             <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">{members.length} Members</h3>
             {canMutate && hasAdministrativeClearance && (
-              <button 
-                type="button"
-                onClick={() => setIsAssignModalOpen(true)}
-                className="btn btn-primary btn-sm rounded-xl font-bold text-primary-content shadow-xs cursor-pointer"
-              >
-                + Invite
-              </button>
+              <button type="button" onClick={() => setIsAssignModalOpen(true)} className="btn btn-primary btn-sm rounded-xl font-bold text-primary-content shadow-xs cursor-pointer">+ Invite</button>
             )}
           </div>
           <div className="overflow-x-auto border border-base-300 rounded-xl bg-base-200/20">
@@ -238,7 +257,6 @@ export default function ProjectTabsContainer({
                   const mName = m.name || m.user?.name || "User";
                   const mEmail = m.email || m.user?.email || "";
                   const mId = m.userId || m.id; 
-                  
                   const isSelf = mId === currentUserId;
 
                   return (
@@ -248,30 +266,14 @@ export default function ProjectTabsContainer({
                         <div><p className="font-bold">{mName}</p><p className="text-[11px] text-base-content/40 font-normal">{mEmail}</p></div>
                       </td>
                       <td className="py-3 px-4"><span className="badge badge-primary badge-sm font-bold uppercase px-1.5 rounded">{m.role}</span></td>
-                      
-                      {/* 🚀 FIXED: Dynamic lookup reads plain string value or fallback string cleanly */}
-                      <td className="py-3 px-4 font-bold text-base-content/70">
-                        {m.department && m.department.trim() !== "" ? (
-                          m.department
-                        ) : (
-                          <span className="italic text-base-content/30 font-medium opacity-40">Unassigned</span>
-                        )}
+                      <td className="py-3 px-4 font-bold text-base-content/70 font-sans">
+                        {m.department && m.department.trim() !== "" ? m.department : <span className="italic text-base-content/30 font-medium opacity-40">Unassigned</span>}
                       </td>
-                      
                       <td className="py-3 px-4"><span className="badge badge-success bg-success/10 border-success/20 text-success-content badge-xs font-bold rounded px-1 flex items-center gap-1">● {m.status || "Active"}</span></td>
-                      
                       {hasAdministrativeClearance && (
                         <td className="py-3 px-4 text-right">
                           {!isSelf && (
-                            <button
-                              type="button"
-                              disabled={isEvicting}
-                              onClick={() => handleRemoveMemberClick(mId, mName)}
-                              className="btn btn-ghost btn-xs btn-circle text-neutral/40 hover:text-error hover:bg-error/5 rounded-lg cursor-pointer transition-colors"
-                              title={`Remove ${mName} from Project`}
-                            >
-                              <UserMinus className="h-4 w-4" />
-                            </button>
+                            <button type="button" disabled={isEvicting} onClick={() => handleRemoveMemberClick(mId, mName)} className="btn btn-ghost btn-xs btn-circle text-neutral/40 hover:text-error hover:bg-error/5 rounded-lg cursor-pointer transition-colors" title={`Remove ${mName} from Project`}><UserMinus className="h-4 w-4" /></button>
                           )}
                         </td>
                       )}
@@ -284,7 +286,7 @@ export default function ProjectTabsContainer({
         </div>
       )}
 
-      {/* TIMELINE ACTIVITY FEED CONTAINER */}
+      {/* ACTIVITY TAB */}
       {activeTab === "ACTIVITY" && (
         <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4 animate-fade-in">
           <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">Activity Log Timeline Feed</h3>
@@ -294,10 +296,8 @@ export default function ProjectTabsContainer({
             ) : (
               activity.map((item, idx) => (
                 <div key={idx} className="relative group">
-                  <div className="absolute -left-[31px] top-0.5 bg-base-100 border border-base-300 rounded-full p-1 shadow-2xs group-hover:border-primary transition-colors">
-                    <span className="h-2.5 w-2.5 bg-primary rounded-full block" />
-                  </div>
-                  <div className="text-xs space-y-0.5 font-medium">
+                  <div className="absolute -left-[31px] top-0.5 bg-base-100 border border-base-300 rounded-full p-1 shadow-2xs group-hover:border-primary transition-colors"><span className="h-2.5 w-2.5 bg-primary rounded-full block" /></div>
+                  <div className="text-xs space-y-0.5 font-medium text-left">
                     <p className="text-base-content"><span className="font-bold tracking-tight pr-1">{item.user}</span>{item.action}</p>
                     <p className="text-[10px] text-base-content/40 font-bold uppercase tracking-wide">{item.time}</p>
                   </div>
@@ -308,26 +308,42 @@ export default function ProjectTabsContainer({
         </div>
       )}
 
-      {/* ROLE-GATED ADMINISTRATIVE SETTINGS PANEL */}
+      {/* SETTINGS TAB */}
       {activeTab === "SETTINGS" && (
         <div className="space-y-6 animate-fade-in">
           {isAuthorized ? (
             <>
+              {/* INTERACTIVE BLUEPRINT WORKFLOW REDIRECT BANNER */}
+              {canMutate && (
+                <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-base-100 to-base-200/40 text-left">
+                  <div className="flex gap-3 items-center">
+                    <div className="p-2.5 bg-primary/10 rounded-xl text-primary shrink-0">
+                      <Sliders className="h-4 w-4 stroke-[2.2]" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-sm text-neutral tracking-tight">Custom Kanban Columns Blueprint</h4>
+                      <p className="text-[11px] font-medium text-neutral/50 leading-relaxed">Modify pipeline lanes, set sequence ordering, or select pre-configured task frameworks locally for this board.</p>
+                    </div>
+                  </div>
+                  <Link 
+                    href={`/dashboard/projects/${currentProjectId}/workflows`}
+                    className="btn btn-primary btn-sm rounded-xl font-bold gap-1.5 text-white shrink-0 shadow-sm cursor-pointer w-full sm:w-auto text-center"
+                  >
+                    Configure Pipeline <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              )}
+
+              {/* GENERAL PROPERTIES CARD */}
               <div className="card bg-base-100 border border-base-300 shadow-xs p-6 space-y-4">
                 <h3 className="font-black text-sm uppercase tracking-wider text-base-content/40">General Properties</h3>
                 
-                <form action={genAction} className="form-control w-full space-y-3">
+                <form action={genAction} className="form-control w-full space-y-3 text-left">
                   {genState?.error && (
-                    <div className="alert alert-error bg-error/10 border-error/20 text-error text-xs rounded-xl py-2.5 px-3 flex items-center gap-2 font-semibold">
-                      <ShieldAlert className="h-4 w-4 shrink-0" />
-                      <span>{genState.error}</span>
-                    </div>
+                    <div className="alert alert-error bg-error/10 border-error/20 text-error text-xs rounded-xl py-2.5 px-3 flex items-center gap-2 font-semibold"><ShieldAlert className="h-4 w-4 shrink-0" /><span>{genState.error}</span></div>
                   )}
                   {genState?.success && (
-                    <div className="alert alert-success bg-success/10 border-success/20 text-success text-xs rounded-xl py-2.5 px-3 flex items-center gap-2 font-semibold">
-                      <CheckCircle2 className="h-4 w-4 shrink-0" />
-                      <span>Workspace parameters updated successfully.</span>
-                    </div>
+                    <div className="alert alert-success bg-success/10 border-success/20 text-success text-xs rounded-xl py-2.5 px-3 flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4 shrink-0" /><span>Workspace parameters updated successfully.</span></div>
                   )}
 
                   <div>
@@ -354,10 +370,11 @@ export default function ProjectTabsContainer({
                 </form>
               </div>
 
+              {/* DANGER ZONE CARD */}
               {canMutate ? (
                 <div className="card bg-base-100 border border-error/30 shadow-xs p-6 space-y-4">
                   <div className="flex items-center gap-2 text-error">
-                    <AlertTriangle className="h-4 w-4 stroke-[2.5]" />
+                    <AlertTriangle className="h-4 w-4 stroke-[2.2]" />
                     <h3 className="font-black text-sm uppercase tracking-wider">Danger Zone</h3>
                   </div>
 
@@ -398,10 +415,7 @@ export default function ProjectTabsContainer({
       )}
 
       {isAssignModalOpen && (
-        <AssignMemberModal 
-          projectId={settings.id} 
-          onClose={() => setIsAssignModalOpen(false)} 
-        />
+        <AssignMemberModal projectId={currentProjectId} onClose={() => setIsAssignModalOpen(false)} />
       )}
 
     </div>

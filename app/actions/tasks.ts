@@ -1,36 +1,50 @@
+// app/actions/tasks.ts
 "use server";
 
 import { prisma } from "@/lib/db";
-import { getSession } from "./auth";
+import { getSession } from "@/lib/auth";
 import { verifyProjectAccess } from "@/lib/rbac";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { logProjectActivity } from "@/lib/logger";
-import { createNotificationAction } from "./notifications"; // 🚀 IMPORT NOTIFICATION LOGIC
+import { createNotificationAction } from "./notifications"; 
 
-async function verifyProjectMutationAccess(projectId: string, userId: string): Promise<{ authorized: boolean; error: string | null }> {
+async function verifyProjectMutationAccess(
+  projectId: string, 
+  userId: string
+): Promise<{ authorized: boolean; error: string | null; role: string | null }> {
   const guard = await verifyProjectAccess(projectId);
+  
   if (!guard.authorized) {
     return { 
       authorized: false, 
-      error: guard.error || "Security Exception: Boundary lock violation. Insufficient project clearance." 
+      error: guard.error || "Security Exception: Boundary lock violation. Insufficient project clearance.",
+      role: null
     };
   }
-  return { authorized: true, error: null };
+  
+  return { 
+    authorized: true, 
+    error: null, 
+    role: guard.role 
+  };
 }
 
 /**
  * ACTION: Hierarchical Task & Sub-Task Creator Engine
  */
 export async function createTask(formData: FormData) {
+  const projectId = formData.get("projectId") as string;
   const title = formData.get("title") as string;
   const description = formData.get("description") as string;
-  const projectId = formData.get("projectId") as string;
   const priority = (formData.get("priority") as any) || "MEDIUM";
   const submittedAssigneeId = formData.get("assigneeId") as string;
   
   const dueDateInput = formData.get("dueDate") as string;
   const parentId = formData.get("parentId") as string || null;
+  
+  // 🚀 NEW: Extract custom pipeline status lane selected within the dialog dropdown engine
+  const statusInput = formData.get("status") as string;
 
   if (!title || !projectId) {
     return { error: "Missing required task fields." };
@@ -39,14 +53,23 @@ export async function createTask(formData: FormData) {
   const session = await getSession();
   if (!session) redirect("/signin");
 
+  // 🛡️ SECURITY GATEWAY: Verify structural project context
   const auth = await verifyProjectMutationAccess(projectId, session.userId);
   if (!auth.authorized) return { error: auth.error };
+
+  // 🔒 GUEST RESTRICTION: Guests cannot create tasks
+  if (auth.role === "GUEST") {
+    return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot create tasks." };
+  }
 
   const finalAssigneeId = submittedAssigneeId && submittedAssigneeId.trim() !== "" 
     ? submittedAssigneeId 
     : session.userId;
 
   const parsedDueDate = dueDateInput ? new Date(dueDateInput) : null;
+
+  // 🚀 Determine lane allocation: Sub-tasks default to TODO, master cards use selection token
+  const finalStatus = parentId && parentId.trim() !== "" ? "TODO" : (statusInput || "TODO");
 
   try {
     const userMembership = await prisma.membership.findFirst({
@@ -62,7 +85,7 @@ export async function createTask(formData: FormData) {
           description: description?.trim() || null,
           projectId,
           priority,
-          status: "TODO",
+          status: finalStatus, // 🚀 FIXED: Dynamic status lane parameter committed cleanly
           assigneeId: finalAssigneeId,
           dueDate: parsedDueDate,
           parentId: parentId && parentId.trim() !== "" ? parentId : null,
@@ -76,13 +99,12 @@ export async function createTask(formData: FormData) {
       await tx.activityLog.create({
         data: {
           projectId,
-          actorName: session.name,
+          actorName: session.name || "Unknown User",
           action: actionMessage,
         },
       });
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Fire real-time alert if assigned to another user
     if (finalAssigneeId !== session.userId && organizationId) {
       await createNotificationAction({
         recipientId: finalAssigneeId,
@@ -100,8 +122,7 @@ export async function createTask(formData: FormData) {
   }
 
   revalidatePath("/dashboard/tasks");
-  revalidatePath(`/dashboard/projects/${projectId}/kanban`);
-  revalidatePath(`/dashboard/projects/${projectId}`);
+  revalidatePath(`/dashboard/projects/${projectId}`); // 🚀 UPDATED: Revalidates embedded tab metrics instantly
   return { success: true };
 }
 
@@ -117,15 +138,21 @@ export async function toggleTaskCompletion(taskId: string, currentStatus: string
   });
   if (!targetTask) return { error: "Target task asset missing from repository." };
 
+  // 🛡️ SECURITY GATEWAY: Enforce project validation check
+  const auth = await verifyProjectMutationAccess(targetTask.projectId, session.userId);
+  if (!auth.authorized) return { error: auth.error };
+
+  // 🔒 GUEST RESTRICTION: Guests cannot complete tasks
+  if (auth.role === "GUEST") {
+    return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot toggle completion." };
+  }
+
   if (targetTask.parentId) {
     const parent = await prisma.task.findUnique({ where: { id: targetTask.parentId } });
     if (parent?.status === "DONE") {
       return { error: "Locked: Cannot modify checklist parameters of a finalized project card task." };
     }
   }
-
-  const auth = await verifyProjectMutationAccess(targetTask.projectId, session.userId);
-  if (!auth.authorized) return { error: auth.error };
 
   const updatedStatus = currentStatus === "DONE" ? "TODO" : "DONE";
 
@@ -139,7 +166,6 @@ export async function toggleTaskCompletion(taskId: string, currentStatus: string
       where: { userId: session.userId },
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Alert creator if the task was finished by someone else
     if (updatedStatus === "DONE" && targetTask.creatorId !== session.userId && userMembership) {
       await createNotificationAction({
         recipientId: targetTask.creatorId,
@@ -155,7 +181,7 @@ export async function toggleTaskCompletion(taskId: string, currentStatus: string
   }
 
   revalidatePath("/dashboard/tasks");
-  revalidatePath(`/dashboard/projects/${targetTask.projectId}/kanban`);
+  revalidatePath(`/dashboard/projects/${targetTask.projectId}`); // 🚀 UPDATED: Purged obsolete /kanban cache targets
   return { success: true };
 }
 
@@ -172,10 +198,17 @@ export async function updateTaskStatus(taskId: string, newStatus: string) {
   });
   if (!targetTask) return { error: "Target task record missing from active database branch." };
 
+  // 🛡️ SECURITY GATEWAY: Check configuration clearance blockages
   const auth = await verifyProjectMutationAccess(targetTask.projectId, session.userId);
   if (!auth.authorized) return { error: auth.error };
 
-  if (targetTask.status === "DONE") {
+  // 🔒 GUEST RESTRICTION: Guests cannot move columns or modify states
+  if (auth.role === "GUEST") {
+    return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot change workflow columns." };
+  }
+
+  // Adjusted to use a strict blueprint lock check against whatever your custom last column item resolves to
+  if (targetTask.status === "DONE" && newStatus !== "DONE") {
     return { error: "Workflow Lock: Completed tasks are archived and cannot be dragged backwards." };
   }
 
@@ -196,15 +229,14 @@ export async function updateTaskStatus(taskId: string, newStatus: string) {
 
     await logProjectActivity({
       projectId: targetTask.projectId,
-      actorName: session.name,
-      action: `changed status of "${targetTask.title}" to ${newStatus.replace("_", " ")}`,
+      actorName: session.name || "Unknown User",
+      action: `changed status of "${targetTask.title}" to ${newStatus.replace(/_/g, " ")}`,
     });
 
     const userMembership = await prisma.membership.findFirst({
       where: { userId: session.userId },
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Alert creator if status advances to DONE
     if (newStatus === "DONE" && targetTask.creatorId !== session.userId && userMembership) {
       await createNotificationAction({
         recipientId: targetTask.creatorId,
@@ -217,37 +249,41 @@ export async function updateTaskStatus(taskId: string, newStatus: string) {
     }
 
     revalidatePath("/dashboard/tasks");
-    revalidatePath(`/dashboard/projects/${targetTask.projectId}/kanban`);
+    revalidatePath(`/dashboard/projects/${targetTask.projectId}`); // 🚀 UPDATED: Re-sync parent layout view state loops
     return { success: true, task: updatedTask };
   } catch (error) {
     return { error: "Runtime Error: Failed to write status update parameter to cluster state." };
   }
 }
+
 /**
- * ACTION: Safely purges a master task card, logs the action to the activity stream,
- * and alerts all other project-assigned team members.
+ * ACTION: Safely purges a master task card
  */
 export async function deleteMainTask(taskId: string, projectId: string) {
   try {
-    // 1. Authenticate session context
     const session = await getSession();
     if (!session) return { error: "Authentication signature checkpoint mismatch." };
 
-    // 2. Query workspace user membership parameters
+    const auth = await verifyProjectMutationAccess(projectId, session.userId);
+    if (!auth.authorized) return { error: auth.error };
+    
+    // 🔒 GUEST RESTRICTION: Guests cannot drop or purge macro project tasks
+    if (auth.role === "GUEST") {
+      return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot delete tasks." };
+    }
+
     const membership = await prisma.membership.findFirst({
       where: { userId: session.userId },
       include: { user: { select: { name: true } } },
     });
     if (!membership) return { error: "Clearance blocked: Identity mismatch." };
 
-    // 3. CRITICAL PRE-FETCH: Gather task context details *before* we delete it from the schema
     const taskToDelete = await prisma.task.findUnique({
       where: { id: taskId },
       select: { title: true },
     });
     if (!taskToDelete) return { error: "Target task record was not found or already deleted." };
 
-    // 4. Query all team assignments attached to this specific project for notifications
     const projectAssignments = await prisma.assignment.findMany({
       where: { projectId: projectId },
       select: { userId: true },
@@ -256,23 +292,19 @@ export async function deleteMainTask(taskId: string, projectId: string) {
     const actorName = membership.user.name;
     const logActivityText = `deleted task "${taskToDelete.title}"`;
 
-    // 5. Execute deletion, append logs, and broadcast notifications in a robust transaction block
     await prisma.$transaction([
-      // A. Safely purge the master task (Cascades down to clean subtasks if your schema permits, or explicitly cleans them)
       prisma.task.delete({
         where: { id: taskId },
       }),
 
-      // B. Post a permanent audit record straight to the Project Activity Board
       prisma.activityLog.create({
         data: {
           projectId: projectId,
-          actorName: actorName,
+          actorName: actorName || "Unknown User",
           action: logActivityText,
         },
       }),
 
-      // C. Broadcast real-time system notifications to every assigned user (except the actor)
       ...projectAssignments
         .filter((assignee) => assignee.userId !== session.userId)
         .map((assignee) =>
@@ -289,8 +321,7 @@ export async function deleteMainTask(taskId: string, projectId: string) {
         ),
     ]);
 
-    // 6. Force immediate server-side validation tree clear parameters
-    revalidatePath(`/dashboard/projects/${projectId}`);
+    revalidatePath(`/dashboard/projects/${projectId}`); // 🚀 UPDATED: Sweeps unified tab layout parameters cleanly
     revalidatePath(`/dashboard/tasks`);
 
     return { success: true };
@@ -312,6 +343,11 @@ export async function deleteSubTask(subTaskId: string, projectId: string) {
     return { error: guard.error || "Access Denied: Project team membership required." };
   }
 
+  // 🔒 GUEST RESTRICTION: Guests cannot delete subtasks
+  if (guard.role === "GUEST") {
+    return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot delete checklist nodes." };
+  }
+
   try {
     const subTask = await prisma.task.findUnique({
       where: { id: subTaskId },
@@ -321,52 +357,58 @@ export async function deleteSubTask(subTaskId: string, projectId: string) {
     if (!subTask) return { error: "Subtask not found." };
     if (subTask.parentId === null) return { error: "Operation Refused: Target is a master card node." };
 
-    const isOwner = guard.role === "OWNER";
+    const isOwnerOrAdmin = guard.role === "OWNER" || guard.role === "ADMIN";
     const isCreator = subTask.creatorId === session.userId;
 
-    if (!isOwner && !isCreator) {
+    if (!isOwnerOrAdmin && !isCreator) {
       return { error: "Access Gated: You can only delete subtasks that you personally initialized." };
     }
 
     await prisma.task.delete({ where: { id: subTaskId } });
 
-    revalidatePath(`/dashboard/projects/${projectId}/kanban`);
+    revalidatePath(`/dashboard/projects/${projectId}`); // 🚀 UPDATED: Triggers refresh layout tree loop
     return { success: true };
   } catch (error) {
     return { error: "System Fault: Failed to purge child checklist node." };
   }
 }
+
 interface UpdateTaskPayload {
   taskId: string;
   projectId: string;
   title: string;
   description?: string;
-  priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+  priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; // 🚀 FIXED: Aligned option tokens with container schemas
   status: string;
   dueDate?: string | null;
 }
 
 export async function updateTaskDetailsAction(payload: UpdateTaskPayload) {
   try {
-    // 1. Authenticate session context
     const session = await getSession();
     if (!session) return { error: "Authentication signature checkpoint mismatch." };
 
-    // 2. Query workspace user membership parameters
+    // 🛡️ SECURITY GATEWAY: Intercept non-clearance operations
+    const auth = await verifyProjectMutationAccess(payload.projectId, session.userId);
+    if (!auth.authorized) return { error: auth.error };
+
+    // 🔒 GUEST RESTRICTION: Guests cannot modify task fields
+    if (auth.role === "GUEST") {
+      return { error: "Access Gated: Guest profiles possess Commenter/Viewer rights and cannot alter task description fields or due dates." };
+    }
+
     const membership = await prisma.membership.findFirst({
       where: { userId: session.userId },
       include: { user: { select: { name: true } } },
     });
     if (!membership) return { error: "Clearance blocked: Identity mismatch." };
 
-    // 3. Gather original task details for log tracking context prior to modification
     const originalTask = await prisma.task.findUnique({
       where: { id: payload.taskId },
       select: { title: true },
     });
     if (!originalTask) return { error: "Target task record was not found." };
 
-    // 4. Query all user assignments attached to this specific project to form the notification roster
     const projectAssignments = await prisma.assignment.findMany({
       where: { projectId: payload.projectId },
       select: { userId: true },
@@ -375,9 +417,7 @@ export async function updateTaskDetailsAction(payload: UpdateTaskPayload) {
     const actorName = membership.user.name;
     const logActivityText = `edited task "${originalTask.title}"`;
 
-    // 5. Run modifications, activity logs, and notifications simultaneously in a single transaction
     await prisma.$transaction([
-      // A. Update the core task row properties
       prisma.task.update({
         where: { id: payload.taskId },
         data: {
@@ -389,16 +429,14 @@ export async function updateTaskDetailsAction(payload: UpdateTaskPayload) {
         },
       }),
 
-      // B. Append a new record straight to the Project Activity Board
       prisma.activityLog.create({
         data: {
           projectId: payload.projectId,
-          actorName: actorName,
+          actorName: actorName || "Unknown User",
           action: logActivityText,
         },
       }),
 
-      // C. Dispatch real-time system notification entries to every assigned team member (except the person editing)
       ...projectAssignments
         .filter((assignee) => assignee.userId !== session.userId)
         .map((assignee) =>
@@ -415,8 +453,7 @@ export async function updateTaskDetailsAction(payload: UpdateTaskPayload) {
         ),
     ]);
 
-    // 6. Purge Next.js cache headers live to instantly display notifications and activity logs
-    revalidatePath(`/dashboard/projects/${payload.projectId}`);
+    revalidatePath(`/dashboard/projects/${payload.projectId}`); // 🚀 UPDATED: Re-evaluates client metrics deck
     revalidatePath(`/dashboard/tasks`);
     
     return { success: true };

@@ -25,21 +25,26 @@ export default function NotificationsWorkspace({ currentUserId, organizationId }
     reloadAlertLogs();
   }, [currentUserId, organizationId]);
 
-  // 🚀 LIVE STREAMING: Connect to personal notification channel fields via Pusher
+  // 🚀 FIXED: Leak-Proof personal notification channel stream listener connection
   useEffect(() => {
+    if (!currentUserId) return;
+
     const pusher = new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY || "", {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "",
     });
 
-    const personalAlertChannel = pusher.subscribe(`user-alerts-${currentUserId}`);
+    const targetChannel = `user-alerts-${currentUserId}`;
+    const personalAlertChannel = pusher.subscribe(targetChannel);
 
     personalAlertChannel.bind("new-alert", (incomingAlert: any) => {
       setNotifications(prev => [incomingAlert, ...prev]);
     });
 
+    // 🚀 CRITICAL CLEANUP: Explicitly breaks connection links on unmount parameters
     return () => {
       personalAlertChannel.unbind_all();
-      pusher.unsubscribe(`user-alerts-${currentUserId}`);
+      pusher.unsubscribe(targetChannel);
+      pusher.disconnect(); // Force terminates the socket handshake immediately
     };
   }, [currentUserId]);
 
@@ -59,6 +64,7 @@ export default function NotificationsWorkspace({ currentUserId, organizationId }
     switch (type) {
       case "TASK_ASSIGNED": return <CheckSquare className="h-4 w-4 text-primary" />;
       case "MENTION": return <MessageSquare className="h-4 w-4 text-info" />;
+      case "CHAT_MENTION": return <MessageSquare className="h-4 w-4 text-info" />; // Dynamic chat support handling
       case "TASK_COMPLETED": return <CheckSquare className="h-4 w-4 text-success" />;
       case "PROJECT_UPDATED": return <Folder className="h-4 w-4 text-warning" />;
       default: return <Bell className="h-4 w-4 text-neutral" />;
@@ -123,7 +129,7 @@ export default function NotificationsWorkspace({ currentUserId, organizationId }
             <div 
               key={notif.id}
               onClick={() => !notif.isRead && handleSingleRead(notif.id)}
-              className={`flex items-start gap-4 p-4 rounded-2xl border transition-all duration-150 relative cursor-pointer group bg-base-100 ${
+              className={`flex items-start gap-4 p-4 rounded-2xl border transition-all duration-150 relative cursor-pointer group bg-base-100 text-left ${
                 notif.isRead 
                   ? "border-base-200 opacity-70 hover:opacity-100" 
                   : "border-primary/20 bg-primary/5 hover:bg-primary/10 shadow-xs"

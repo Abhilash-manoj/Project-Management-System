@@ -3,6 +3,7 @@
 
 import { prisma } from "@/lib/db";
 import { getSession } from "./auth";
+import { verifyProjectAccess } from "@/lib/rbac";
 import { createNotificationAction } from "./notifications";
 import { revalidatePath } from "next/cache";
 
@@ -17,7 +18,23 @@ export async function createTaskComment(taskId: string, body: string) {
     const cleanBody = body.trim();
     if (!cleanBody) return { error: "Comment text cannot be empty." };
 
-    // 1. Save the comment row
+    // 1. Fetch task to discover parent projectId context before allowing any action
+    const targetTaskContext = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true }
+    });
+
+    if (!targetTaskContext) {
+      return { error: "Target task asset missing from repository." };
+    }
+
+    // 🛡️ SECURITY CHECK: Validate project-level context access for the caller
+    const guard = await verifyProjectAccess(targetTaskContext.projectId);
+    if (!guard.authorized) {
+      return { error: guard.error || "Access Gated: Project affiliation required to comment." };
+    }
+
+    // 2. Save the comment row
     const comment = await prisma.comment.create({
       data: {
         body: cleanBody,
@@ -26,12 +43,11 @@ export async function createTaskComment(taskId: string, body: string) {
       },
       include: {
         author: { select: { name: true } },
-        // 🚀 FIXED: Added assigneeId to selection criteria alongside creatorId
         task: { select: { title: true, creatorId: true, assigneeId: true, projectId: true } }
       }
     });
 
-    // 2. Resolve organization context for notifications
+    // 3. Resolve organization context for notifications
     const userMembership = await prisma.membership.findFirst({
       where: { userId: session.userId },
     });
@@ -40,7 +56,7 @@ export async function createTaskComment(taskId: string, body: string) {
       const orgId = userMembership.organizationId;
       const snippet = cleanBody.length > 40 ? `${cleanBody.substring(0, 40)}...` : cleanBody;
 
-      // 🚀 NOTIFICATION SYSTEM 1: Alert the Task Creator if someone else comments
+      // NOTIFICATION SYSTEM 1: Alert the Task Creator if someone else comments
       if (comment.task.creatorId !== session.userId) {
         await createNotificationAction({
           recipientId: comment.task.creatorId,
@@ -52,7 +68,7 @@ export async function createTaskComment(taskId: string, body: string) {
         });
       }
 
-      // 🚀 NOTIFICATION SYSTEM 2: Alert the Assignee if someone else comments
+      // NOTIFICATION SYSTEM 2: Alert the Assignee if someone else comments
       if (comment.task.assigneeId && comment.task.assigneeId !== session.userId && comment.task.assigneeId !== comment.task.creatorId) {
         await createNotificationAction({
           recipientId: comment.task.assigneeId,
@@ -66,6 +82,7 @@ export async function createTaskComment(taskId: string, body: string) {
     }
 
     revalidatePath(`/dashboard/tasks`);
+    revalidatePath(`/dashboard/projects/${targetTaskContext.projectId}`);
     return { success: true, comment };
   } catch (error) {
     console.error("Failed to append task comment node:", error);
@@ -78,6 +95,21 @@ export async function createTaskComment(taskId: string, body: string) {
  */
 export async function getTaskComments(taskId: string) {
   try {
+    const session = await getSession();
+    if (!session) return [];
+
+    // 1. Discover target parent projectId context for read gating operations
+    const targetTaskContext = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true }
+    });
+
+    if (!targetTaskContext) return [];
+
+    // 🛡️ SECURITY CHECK: Read-gate comment retrieval logs based on project tracking assignments
+    const guard = await verifyProjectAccess(targetTaskContext.projectId);
+    if (!guard.authorized) return [];
+
     return await prisma.comment.findMany({
       where: { taskId },
       orderBy: { createdAt: "asc" },

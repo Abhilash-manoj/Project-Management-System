@@ -23,24 +23,64 @@ export default async function MembersManagementDashboardPage() {
   // 3. SECURITY CHECK: Determine administration permissions
   const isInternalAdmin = membership.role === "OWNER" || membership.role === "ADMIN";
 
-  // 4. Query live active team roster matching active organization space
-  const activeTeamMembers = await prisma.membership.findMany({
-    where: { organizationId: membership.organizationId },
-    select: {
-      id: true,
-      role: true,
-      status: true,
-      department: true,
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      }
-    },
-    orderBy: { role: "asc" },
-  });
+  // 4. Query live active team roster matching permissions architecture
+  let activeTeamMembers = [];
+
+  if (membership.role === "GUEST") {
+    // 🛡️ GUEST SANDBOX LOCKDOWN: Query only project IDs explicitly assigned to this guest
+    const sharedAssignments = await prisma.assignment.findMany({
+      where: { userId: session.userId },
+      select: { projectId: true },
+    });
+    const assignedProjectIds = sharedAssignments.map((a) => a.projectId);
+
+    // Fetch only teammates sharing those project parameters to prevent directory data leaks
+    activeTeamMembers = await prisma.membership.findMany({
+      where: {
+        organizationId: membership.organizationId,
+        user: {
+          assignments: {
+            some: {
+              projectId: { in: assignedProjectIds },
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        department: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { role: "asc" },
+    });
+  } else {
+    // Standard Employees, Admins, and Owners view the complete global corporate framework
+    activeTeamMembers = await prisma.membership.findMany({
+      where: { organizationId: membership.organizationId },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        department: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { role: "asc" },
+    });
+  }
 
   // 5. Query active bulk links (Only valid, unexpired, and unspent links are retrieved)
   const currentTimestampDate = new Date();
@@ -48,7 +88,6 @@ export default async function MembersManagementDashboardPage() {
     ? await prisma.joinLink.findMany({
         where: { 
           organizationId: membership.organizationId,
-          // 🚀 FIXED: Dynamic database filter hides links immediately when they expire or hit use allocations
           AND: [
             {
               currentUses: {
@@ -87,7 +126,7 @@ export default async function MembersManagementDashboardPage() {
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in font-sans">
       
       {/* PAGE HEADER ROW */}
-      <div className="flex flex-col gap-0.5 border-b border-base-300 pb-4">
+      <div className="flex flex-col gap-0.5 border-b border-base-300 pb-4 text-left">
         <div className="flex items-center gap-2 text-primary">
           <Users className="h-5 w-5 stroke-[2.5]" />
           <h2 className="text-2xl font-black text-neutral tracking-tight">Team Members Directory</h2>
@@ -95,7 +134,9 @@ export default async function MembersManagementDashboardPage() {
         <p className="text-xs text-neutral/50 font-semibold">
           {isInternalAdmin 
             ? "Orchestrate organization identity profiles, bulk onboarding parameters, and sandbox limits."
-            : "View-only access to your active organizational team directory network."}
+            : membership.role === "GUEST"
+              ? "Sandboxed view of active colleagues assigned to your matching project channels."
+              : "View-only access to your active organizational team directory network."}
         </p>
       </div>
 
@@ -108,14 +149,14 @@ export default async function MembersManagementDashboardPage() {
             <MemberOnboardingForm projectContextList={workspaceProjectsList} />
           </div>
         ) : (
-          /* Notice plate rendered explicitly to Employees explaining directory boundaries */
+          /* Notice plate rendered explicitly to Employees/Guests explaining directory boundaries */
           <div className="card bg-base-100 border border-base-300 p-5 space-y-3 text-neutral/60 shadow-xs text-left">
             <div className="flex items-center gap-2 text-warning">
               <KeyRound className="h-4 w-4 stroke-[2.5]" />
               <h4 className="font-black text-neutral text-sm">Clearance Restricted</h4>
             </div>
             <p className="text-xs font-medium leading-relaxed">
-              Your profile is registered under an <span className="badge badge-sm font-bold bg-base-200 border-base-300 text-neutral uppercase px-1 rounded">{membership.role}</span> configuration. Account creation generation features are masked. Contact a workspace Administrator to register additional project colleagues.
+              Your profile is registered under a <span className="badge badge-sm font-bold bg-base-200 border-base-300 text-neutral uppercase px-1 rounded">{membership.role}</span> configuration. Account creation generation features are masked. Contact a workspace Administrator to register additional project colleagues.
             </p>
           </div>
         )}
@@ -130,60 +171,66 @@ export default async function MembersManagementDashboardPage() {
             </h3>
             
             <div className="divide-y divide-base-300 border border-base-300 rounded-xl overflow-hidden bg-base-200/30">
-              {activeTeamMembers.map((member) => (
-                <div key={member.id} className="p-3.5 flex items-center justify-between text-sm font-medium hover:bg-base-100 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="avatar placeholder">
-                      <div className="h-8 w-8 bg-primary/10 text-primary font-bold rounded-full border border-primary/20 flex items-center justify-center text-xs select-none">
-                        <span>{member.user.name.charAt(0).toUpperCase()}</span>
+              {activeTeamMembers.length === 0 ? (
+                <p className="text-xs text-neutral/40 font-semibold italic p-6 text-center bg-base-100">
+                  No visible organization colleagues found within your project perimeters.
+                </p>
+              ) : (
+                activeTeamMembers.map((member) => (
+                  <div key={member.id} className="p-3.5 flex items-center justify-between text-sm font-medium hover:bg-base-100 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="avatar placeholder">
+                        <div className="h-8 w-8 bg-primary/10 text-primary font-bold rounded-full border border-primary/20 flex items-center justify-center text-xs select-none">
+                          <span>{member.user.name.charAt(0).toUpperCase()}</span>
+                        </div>
+                      </div>
+                      <div className="text-left">
+                        <div className="flex items-center gap-2">
+                          <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
+                          {/* Status Bubble Tag Element Indicator */}
+                          <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.2 border ${
+                            member.status === "INACTIVE" 
+                              ? "bg-error/10 text-error border-error/20" 
+                              : "bg-success/10 text-success border-success/20"
+                          }`}>
+                            {member.status || "ACTIVE"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-neutral/40 font-semibold leading-tight">{member.user.email}</p>
+                        
+                        {/* Dynamic plain text department render string with high-visibility fallback tag */}
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-neutral/40 flex items-center gap-1 mt-1 select-none">
+                          <Building className="h-3 w-3 text-neutral/30 stroke-[2.2]" /> 
+                          {member.department && member.department.trim() !== "" ? (
+                            <span className="text-primary font-black">{member.department} Division</span>
+                          ) : (
+                            <span className="italic opacity-50 font-semibold">Unassigned</span>
+                          )}
+                        </p>
                       </div>
                     </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
-                        {/* Status Bubble Tag Element Indicator */}
-                        <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.2 border ${
-                          member.status === "INACTIVE" 
-                            ? "bg-error/10 text-error border-error/20" 
-                            : "bg-success/10 text-success border-success/20"
-                        }`}>
-                          {member.status || "ACTIVE"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-neutral/40 font-semibold leading-tight">{member.user.email}</p>
-                      
-                      {/* Dynamic plain text department render string with high-visibility fallback tag */}
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-neutral/40 flex items-center gap-1 mt-1 select-none">
-                        <Building className="h-3 w-3 text-neutral/30 stroke-[2.2]" /> 
-                        {member.department && member.department.trim() !== "" ? (
-                          <span className="text-primary font-black">{member.department} Division</span>
-                        ) : (
-                          <span className="italic opacity-50 font-semibold">Unassigned</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <span className="badge bg-base-200 border border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
-                      {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
-                      {member.role}
-                    </span>
+                    
+                    <div className="flex items-center gap-3">
+                      <span className="badge bg-base-200 border border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
+                        {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
+                        {member.role}
+                      </span>
 
-                    {/* EMBEDDED CONTROL TRIGGER PANEL SLOT */}
-                    <MemberRosterRowControls 
-                      targetUser={{
-                        id: member.user.id,
-                        name: member.user.name,
-                        role: member.role,
-                        status: member.status || "ACTIVE"
-                      }}
-                      currentUserId={session.userId}
-                      currentUserOrgRole={membership.role}
-                    />
+                      {/* EMBEDDED CONTROL TRIGGER PANEL SLOT */}
+                      <MemberRosterRowControls 
+                        targetUser={{
+                          id: member.user.id,
+                          name: member.user.name,
+                          role: member.role,
+                          status: member.status || "ACTIVE"
+                        }}
+                        currentUserId={session.userId}
+                        currentUserOrgRole={membership.role}
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 

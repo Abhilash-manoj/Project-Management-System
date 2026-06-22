@@ -1,3 +1,4 @@
+// app/actions/communication.ts
 "use server";
 
 import { prisma } from "@/lib/db";
@@ -8,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import { OrgRole } from "@prisma/client";
 import { realtimeServer } from "@/lib/realtime";
 import { NextRequest, NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
 
 interface SearchPayload {
   organizationId: string;
@@ -15,6 +17,18 @@ interface SearchPayload {
   searchQuery: string;
 }
 
+interface DeleteMessagePayload {
+  messageId: string;
+  userId: string;
+  organizationId: string;
+}
+
+interface GroupChatPayload {
+  creatorId: string;
+  organizationId: string;
+  groupName: string;
+  invitedUserIds: string[];
+}
 
 /**
  * FLOW B: Isolated Directory Search Engine
@@ -124,13 +138,13 @@ export async function createGroupChat(creatorId: string, userIds: string[], grou
       name: groupName,
       isGroup: true,
       organizationId,
+      creatorId, 
       participants: {
         create: uniqueParticipants.map(id => ({ userId: id }))
       }
     }
   });
 }
-
 
 /**
  * ACTION: Fetches all employees belonging to the exact same company tenant boundary.
@@ -200,6 +214,7 @@ export async function getUserConversations(userId: string, organizationId: strin
       organizationId,
       participants: { some: { userId } }
     },
+    // 🚀 FIXED: Only relational fields are left here. Base fields are fetched automatically!
     include: {
       participants: {
         include: {
@@ -218,9 +233,11 @@ export async function getUserConversations(userId: string, organizationId: strin
   });
 }
 
+/**
+ * ACTION: Fetches messages for a specific conversation and updates lastViewedAt cursor references.
+ */
 export async function getConversationMessages(conversationId: string, userId: string) {
   try {
-    
     await prisma.participant.updateMany({
       where: {
         conversationId,
@@ -231,7 +248,6 @@ export async function getConversationMessages(conversationId: string, userId: st
       }
     });
 
-    // Fetch and return historical message arrays as normal
     return await prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
@@ -242,13 +258,11 @@ export async function getConversationMessages(conversationId: string, userId: st
     return [];
   }
 }
-
 /**
  * ACTION: Computes the aggregate number of unread messages across all company rooms the user is a part of.
  */
 export async function getUnreadMessageCount(userId: string, organizationId: string): Promise<number> {
   try {
-    // 1. Grab all conversations joined by the user inside this organization boundary
     const participantRooms = await prisma.participant.findMany({
       where: {
         userId,
@@ -264,12 +278,11 @@ export async function getUnreadMessageCount(userId: string, organizationId: stri
 
     let totalUnread = 0;
 
-    // 2. Count messages created after each room's specific lastViewedAt cursor
     for (const room of participantRooms) {
       const count = await prisma.message.count({
         where: {
           conversationId: room.conversationId,
-          senderId: { not: userId }, // Don't count your own text echoes as unread
+          senderId: { not: userId }, 
           createdAt: { gt: room.lastViewedAt }
         }
       });
@@ -303,17 +316,8 @@ export async function markConversationAsRead(conversationId: string, userId: str
   }
 }
 
-
-interface GroupChatPayload {
-  creatorId: string;
-  organizationId: string;
-  groupName: string;
-  invitedUserIds: string[];
-}
-
 /**
  * ACTION: Securely generates a multi-tenant group conversation space.
- * Gated Constraint: Only Org Owners and Admins have structural clearance to invoke this mutation.
  */
 export async function createGroupChatAction(payload: GroupChatPayload) {
   const { creatorId, organizationId, groupName, invitedUserIds } = payload;
@@ -322,7 +326,6 @@ export async function createGroupChatAction(payload: GroupChatPayload) {
   if (!cleanName) return { error: "A valid group name designation is required." };
 
   try {
-    // 1. Resolve caller membership and authorize against role constraints
     const membership = await prisma.membership.findUnique({
       where: {
         userId_organizationId: {
@@ -336,25 +339,22 @@ export async function createGroupChatAction(payload: GroupChatPayload) {
       return { error: "Multi-tenant isolation breach: Profile link not verified." };
     }
 
-    // Strict Clearance Gate: Prevent EMPLOYEE and GUEST tiers from completing initialization
     const isAuthorized = membership.role === OrgRole.OWNER || membership.role === OrgRole.ADMIN;
     if (!isAuthorized) {
       return { error: "Access Gated: Only workspace Owners and Administrators can establish group channels." };
     }
 
-    // 2. Build explicit unique participant array ensuring creator is pinned
     const cleanParticipantIds = Array.from(new Set([creatorId, ...invitedUserIds]));
 
-    // 3. Commit atomic transaction pool instantiation
     const newGroup = await prisma.conversation.create({
       data: {
         name: cleanName,
         isGroup: true,
         organizationId,
+        creatorId, 
         participants: {
           create: cleanParticipantIds.map(id => ({
             userId: id,
-            // Pre-seed read cursor layout to synchronize unread badge baselines cleanly
             lastViewedAt: new Date()
           }))
         }
@@ -371,15 +371,28 @@ export async function createGroupChatAction(payload: GroupChatPayload) {
   }
 }
 
-
 /**
- * Dispatches a message entry transaction node and triggers a real-time layout sync.
+ * Dispatches a message entry transaction node, extracts mentions, and triggers layouts syncs.
  */
 export async function sendMessage(conversationId: string, senderId: string, body: string, attachments: string[] = []) {
   const isParticipant = await prisma.participant.findUnique({
-    where: { conversationId_userId: { conversationId, userId: senderId } }
+    where: { conversationId_userId: { conversationId, userId: senderId } },
+    include: { conversation: true }
   });
   if (!isParticipant) throw new Error("Unauthorized message dispatch attempt.");
+
+  const targetOrgId = isParticipant.conversation.organizationId;
+
+  const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
+  const extractedUserIds: string[] = [];
+  let match;
+  while ((match = mentionRegex.exec(body)) !== null) {
+    const parsedId = match[2];
+    if (parsedId !== senderId) {
+      extractedUserIds.push(parsedId);
+    }
+  }
+  const uniqueMentionedIds = Array.from(new Set(extractedUserIds));
 
   return await prisma.$transaction(async (tx) => {
     const message = await tx.message.create({
@@ -389,13 +402,31 @@ export async function sendMessage(conversationId: string, senderId: string, body
       }
     });
 
-    // Touch conversation record timestamp update flag
     await tx.conversation.update({
       where: { id: conversationId },
       data: { updatedAt: new Date() }
     });
 
-    // 🚀 NEW: Broadcast the fresh payload into the unique room subscription channel stream
+    if (uniqueMentionedIds.length > 0) {
+      await tx.messageMention.createMany({
+        data: uniqueMentionedIds.map(userId => ({
+          messageId: message.id,
+          userId: userId
+        }))
+      });
+
+      await tx.notification.createMany({
+        data: uniqueMentionedIds.map(userId => ({
+          recipientId: userId,
+          organizationId: targetOrgId,
+          type: "MENTION" as any, 
+          title: "💬 Mentions Tag Alert",
+          description: `${message.sender.name || "A team member"} tagged you in a conversation timeline thread.`,
+          isRead: false
+        }))
+      });
+    }
+
     try {
       await realtimeServer.trigger(`chat-${conversationId}`, "new-message", {
         id: message.id,
@@ -413,10 +444,8 @@ export async function sendMessage(conversationId: string, senderId: string, body
   });
 }
 
-
 /**
  * API ENDPOINT: Resolves a specific user's operational role within an organization.
- * Used by client canvases to conditionally toggle high-privilege administrative actions.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -446,20 +475,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-
-interface DeleteMessagePayload {
-  messageId: string;
-  userId: string;
-  organizationId: string;
-}
-
 /**
  * ACTION: Securely purges a message from a chat timeline.
- * Constraints: Gated to the original message sender, or workspace Owners and Admins.
  */
 export async function deleteMessageAction({ messageId, userId, organizationId }: DeleteMessagePayload) {
   try {
-    // 1. Fetch target message along with context about the room layout
     const message = await prisma.message.findUnique({
       where: { id: messageId },
       include: { conversation: true }
@@ -469,10 +489,8 @@ export async function deleteMessageAction({ messageId, userId, organizationId }:
       return { error: "Message does not exist or has already been deleted." };
     }
 
-    // 2. Check if the user is the original author
     const isAuthor = message.senderId === userId;
 
-    // 3. Resolve caller organization role permissions criteria
     const membership = await prisma.membership.findUnique({
       where: {
         userId_organizationId: { userId, organizationId }
@@ -481,17 +499,14 @@ export async function deleteMessageAction({ messageId, userId, organizationId }:
 
     const isPrivileged = membership && (membership.role === OrgRole.OWNER || membership.role === OrgRole.ADMIN);
 
-    // Security Gate check
     if (!isAuthor && !isPrivileged) {
       return { error: "Access Gated: You do not have permission to delete this message." };
     }
 
-    // 4. Purge message node securely
     await prisma.message.delete({
       where: { id: messageId }
     });
 
-    // 5. 🚀 REAL-TIME BROADCAST: Emits delete payload into Pusher stream instantly
     try {
       await realtimeServer.trigger(`chat-${message.conversationId}`, "message-deleted", {
         messageId: messageId,
@@ -504,6 +519,79 @@ export async function deleteMessageAction({ messageId, userId, organizationId }:
     return { success: true };
   } catch (error) {
     console.error("Message deletion transactional fault:", error);
+    return { error: "Failed to execute server-side removal transaction." };
+  }
+}
+
+/**
+ * Moderation Action: Evict an active member from a group chat conversation stream.
+ */
+export async function removeUserFromGroup(conversationId: string, targetUserId: string) {
+  try {
+    const session = await getSession();
+    if (!session) return { error: "Authentication expired." };
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { creatorId: true, isGroup: true }
+    });
+
+    if (!conversation || !conversation.isGroup) {
+      return { error: "Target conversational node is not an active group cluster." };
+    }
+
+    if (conversation.creatorId !== session.userId) {
+      return { error: "Clearance Fault: Only the group creator can remove team members." };
+    }
+
+    if (targetUserId === session.userId) {
+      return { error: "Validation Fault: You cannot evict yourself. Disband or delete the channel instead." };
+    }
+
+    await prisma.participant.delete({
+      where: {
+        conversationId_userId: {
+          conversationId,
+          userId: targetUserId
+        }
+      }
+    });
+
+    revalidatePath("/dashboard/messages");
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to execute member eviction:", error);
+    return { error: "Database transaction exception encountered during moderation change." };
+  }
+}
+
+/**
+ * Moderation Action: Disband and securely delete an entire group chat timeline matrix.
+ */
+export async function deleteGroupChat(conversationId: string) {
+  try {
+    const session = await getSession();
+    if (!session) return { error: "Authentication expired." };
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { creatorId: true }
+    });
+
+    if (!conversation) return { error: "Conversation target missing." };
+
+    if (conversation.creatorId !== session.userId) {
+      return { error: "Clearance Fault: Only the group creator possesses structural access to purge this room." };
+    }
+
+    await prisma.conversation.delete({
+      where: { id: conversationId }
+    });
+
+    revalidatePath("/dashboard/messages");
+    return { success: true };
+  } catch (error) {
+    console.error("Group deletion critical exception:", error);
     return { error: "Failed to execute server-side removal transaction." };
   }
 }

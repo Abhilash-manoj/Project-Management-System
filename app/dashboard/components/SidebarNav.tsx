@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, CheckSquare, Folder, MessageSquare, Users, Settings, Bell } from "lucide-react";
+import { Home, CheckSquare, Folder, Megaphone, MessageSquare, Users, Settings, Bell } from "lucide-react"; // 🚀 IMPORTED: Megaphone icon
 import { getUnreadMessageCount } from "@/app/actions/communication";
 import { getUnreadNotificationCount } from "@/app/actions/notifications"; 
 import PusherClient from 'pusher-js';
@@ -81,6 +81,7 @@ export default function SidebarNav({ currentUserId, organizationId }: SidebarNav
     { name: "Home", href: "/dashboard", icon: Home },
     { name: "My Tasks", href: "/dashboard/tasks", icon: CheckSquare },
     { name: "Projects", href: "/dashboard/projects", icon: Folder },
+    { name: "Announcements", href: "/dashboard/announcements", icon: Megaphone }, // 🚀 NEW: Added Announcements link
     { name: "Messages", href: "/dashboard/messages", icon: MessageSquare, badge: activeMessageDisplayCount }, 
     { name: "Notifications", href: "/dashboard/notifications", icon: Bell, badge: activeNotificationDisplayCount }, 
     { name: "Members", href: "/dashboard/members", icon: Users },
@@ -99,7 +100,6 @@ export default function SidebarNav({ currentUserId, organizationId }: SidebarNav
         const hasBadge = item.badge !== undefined && item.badge > 0;
 
         return (
-          // 🚀 FIXED: Changed stray closing tag syntax cleanly back into list item tags
           <li key={item.href}>
             <Link
               href={item.href}

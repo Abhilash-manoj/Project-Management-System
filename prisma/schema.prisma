@@ -31,6 +31,8 @@ model User {
   comments Comment[]
   receivedNotifications Notification[] @relation("NotificationRecipient")
   sentNotifications     Notification[] @relation("NotificationSender")
+  announcements Announcement[] 
+  userMentions MessageMention[]
 }
 
 model Organization {
@@ -46,6 +48,11 @@ model Organization {
   
   // 🔒 FIXED: Explicit back-relation for multi-tenant conversation scopes
   conversations Conversation[]
+  boardColumns     BoardColumn[]
+  blueprints       ChecklistBlueprint[]
+  intakeTickets    IntakeTicket[]
+  workflowBlueprints WorkflowBlueprint[]
+  announcements Announcement[]
 }
 
 enum OrgRole {
@@ -107,6 +114,7 @@ model Project {
   tasks          Task[]
   joinLinks      JoinLink[]
   activityLogs   ActivityLog[]
+  boardColumns   BoardColumn[]
 }
 
 model Assignment {
@@ -210,6 +218,7 @@ model Conversation {
   name           String?       
   isGroup        Boolean       @default(false)
   organizationId String
+  creatorId      String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -244,6 +253,7 @@ model Message {
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  mentions       MessageMention[]
 
   @@index([conversationId])
   @@index([createdAt(sort: Desc)])
@@ -258,6 +268,8 @@ enum NotificationType {
   INVITATION_ACCEPTED
   DELETE_TASK
   EDIT_TASK
+  SYSTEM_ALERT  
+  GENERAL_ANNOUNCEMENT
 }
 
 model Notification {
@@ -292,4 +304,86 @@ model Comment {
 
   @@index([taskId])
   @@index([authorId])
+}
+
+
+// ==========================================================================
+// PHASE 2: ADVANCED WORKSPACE LOGIC MODELS
+// ==========================================================================
+
+model BoardColumn {
+  id             String       @id @default(cuid())
+  name           String       // e.g., "BACKLOG", "DESIGN_REVIEW", "QA"
+  position       Int          @default(0)
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  projectId      String
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Enforce unique column names per individual project board
+  @@unique([name, projectId])
+  // Index for fast tenant filtering across metrics dashboards
+  @@index([organizationId])
+}
+
+model WorkflowBlueprint {
+  id             String       @id @default(cuid())
+  name           String       // e.g., "Standard Agile Sprint"
+  columns        String[]     // ["BACKLOG", "TODO", "IN_PROGRESS", "QA", "DONE"]
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+
+model ChecklistBlueprint {
+  id             String       @id @default(cuid())
+  title          String       // e.g., "Frontend Deployment Checklist"
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items          String[]     // Multi-tiered simple checkbox subtasks
+  createdAt      DateTime     @default(now())
+}
+
+model IntakeTicket {
+  id             String       @id @default(cuid())
+  title          String
+  description    String       @db.Text
+  submittedBy    String       // Client/Guest email name string
+  status         String       @default("UN_TRIAGED") // UN_TRIAGED, APPROVED, REJECTED
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+}
+
+model Announcement {
+  id             String       @id @default(uuid())
+  title          String
+  content        String       @db.Text
+  isPriority     Boolean      @default(false)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creatorId      String
+  creator        User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+
+model MessageMention {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([messageId])
+  @@index([userId])
 }
