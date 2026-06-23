@@ -76,7 +76,6 @@ export default function SettingsDashboardPageClient({
 
     console.log("🎯 [CLIENT] Form submit initiated. currentUserId status:", currentUserId);
 
-    // 🚀 DEFENSIVE CHECK: Abort instantly if currentUserId is not available
     if (selectedFile && (!currentUserId || currentUserId === "undefined")) {
       setFormResult({
         error: "Configuration Error: User identification parameter missing. Check your parent server component file mappings.",
@@ -93,6 +92,8 @@ export default function SettingsDashboardPageClient({
       // 1. Send the file binary to Vercel Storage explicitly
       if (selectedFile) {
         console.log("⏳ [CLIENT] Initiating upload chunk handshake workflow via Vercel framework...");
+        
+        // 🚀 FIXED: Set access right paths cleanly
         const newBlob = await upload(`avatars/${currentUserId}-${Date.now()}`, selectedFile, {
           access: "public",
           handleUploadUrl: "/api/upload",
