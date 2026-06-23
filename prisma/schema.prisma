@@ -17,6 +17,7 @@ model User {
   email           String       @unique
   name            String
   password        String
+  avatarUrl       String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   memberships     Membership[]
@@ -254,6 +255,7 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
   mentions       MessageMention[]
+  attachmentsData Attachment[]
 
   @@index([conversationId])
   @@index([createdAt(sort: Desc)])
@@ -386,4 +388,17 @@ model MessageMention {
 
   @@index([messageId])
   @@index([userId])
+}
+
+
+model Attachment {
+  id         String   @id @default(cuid())
+  url        String   // The public secure URL returned by Vercel Blob
+  name       String   // e.g., "annual_budget.pdf"
+  type       String   // e.g., "application/pdf" or "image/png"
+  size       Int      // File size in bytes
+  createdAt  DateTime @default(now())
+
+  messageId  String?
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }

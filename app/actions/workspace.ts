@@ -325,35 +325,48 @@ export async function acceptJoinLinkOnboarding(token: string, formData: FormData
 /**
  * ACTION: Update active authenticated user profile details
  */
-export async function updateProfileSettings(formData: FormData) {
+export async function updateProfileSettings(formData: FormData, uploadedAvatarUrl?: string) {
+  console.log("🔌 [SERVER ACTION] Invoked. Avatar string URL input:", uploadedAvatarUrl || "None");
   try {
     const session = await getSession();
+    console.log("🔑 [SERVER ACTION] Session checked. User ID:", session?.userId || "No Session found");
     if (!session) return { error: "Authentication session expired." };
 
     const fullName = formData.get("fullName") as string;
     const typedDepartment = formData.get("department") as string; 
+    console.log("📝 [SERVER ACTION] Fields parsed:", { fullName, typedDepartment });
 
     if (!fullName || fullName.trim() === "") {
       return { error: "Validation Error: Full Name cannot be left blank." };
     }
 
-    await prisma.user.update({
+    console.log("💾 [SERVER ACTION] Executing Prisma User update query...");
+    const updatedUser = await prisma.user.update({
       where: { id: session.userId },
-      data: { name: fullName.trim() },
+      data: { 
+        name: fullName.trim(),
+        ...(uploadedAvatarUrl && { avatarUrl: uploadedAvatarUrl })
+      },
     });
+    console.log("✅ [SERVER ACTION] Prisma User model written successfully:", updatedUser.id);
 
+    console.log("💾 [SERVER ACTION] Executing Prisma Membership updateMany query...");
     await prisma.membership.updateMany({
       where: { userId: session.userId },
       data: {
         department: typedDepartment && typedDepartment.trim() !== "" ? typedDepartment.trim() : null
       }
     });
+    console.log("✅ [SERVER ACTION] Prisma Membership rows written successfully.");
 
+    console.log("⚡ [SERVER ACTION] Revalidating cache segments...");
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/settings");
+    
+    console.log("🚀 [SERVER ACTION] Complete. Returning success flag true.");
     return { success: true };
   } catch (error) {
-    console.error("Failed to persist string profile parameters:", error);
+    console.error("❌ [SERVER ACTION CRASH] Failure inside transaction block:", error);
     return { error: "Database transaction exception failure." };
   }
 }
