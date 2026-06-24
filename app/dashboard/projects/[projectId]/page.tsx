@@ -6,7 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import ProjectTabsContainer from "./components/ProjectTabsContainer";
 import { verifyProjectAccess } from "@/lib/rbac"; 
 
-export const dynamic = "force-dynamic"; // Ensure cache resets live on every page bounce
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -18,7 +18,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const { projectId } = await params;
 
-  // 1. 🛡️ SECURITY PERIMETER CHECK: Validate project-level contextual clearances
+  // 1. SECURITY PERIMETER CHECK: Validate project-level contextual clearances
   const guard = await verifyProjectAccess(projectId);
   if (!guard.authorized) {
     redirect("/dashboard");
@@ -37,9 +37,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   const isGlobalAdmin = currentMembership.role === "ADMIN";
   const isOwnerOrAdmin = isGlobalOwner || isGlobalAdmin;
 
-  // ==========================================================================
-  // HIERARCHICAL LEAF-NODE PROGRESS METRIC CALCULATOR ENGINE
-  // ==========================================================================
+  // Hierarchical Leaf-Node Progress Metric Calculator Engine
   const standaloneTasks = await prisma.task.findMany({
     where: {
       projectId,
@@ -73,6 +71,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           id: true, 
           name: true, 
           email: true,
+          avatarUrl: true, // 🚀 FIXED: Added to sync live teammate avatars across project tabs
           memberships: {
             where: { organizationId: currentMembership.organizationId },
             select: { 
@@ -85,10 +84,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     },
   });
 
-  // Explicit string conversion and default fallbacks to satisfy strict prop signatures
   const serializedMembers = projectAssignments.map(a => ({
     id: String(a.user.id || ""),
-    name: String(a.user.name || "Unknown Teammate")
+    name: String(a.user.name || "Unknown Teammate"),
+    avatarUrl: a.user.avatarUrl // 🚀 FIXED: Propagate fallback tracking down to form selection fields
   }));
 
   // ==========================================================================
@@ -112,11 +111,13 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     },
     orderBy: { createdAt: "asc" },
     include: {
-      assignee: { select: { name: true } },
+      // 🚀 FIXED: Added avatarUrl to parent card assignees on the Kanban board view
+      assignee: { select: { name: true, avatarUrl: true } },
       subTasks: {
         orderBy: { createdAt: "asc" },
         include: {
-          assignee: { select: { name: true } }
+          // 🚀 FIXED: Added avatarUrl to child task card assignees inside the drilldown views
+          assignee: { select: { name: true, avatarUrl: true } }
         }
       }
     }
@@ -147,7 +148,6 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     };
   });
 
-  // ==========================================================================
   const parentTrackTasks = await prisma.task.findMany({
     where: { projectId, parentId: null },
     take: 4,
@@ -177,9 +177,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     };
   });
 
-  // ==========================================================================
   // 🔒 ATTRIBUTE ACCESS PERMISSION CHECK (ABAC GATEWAY)
-  // ==========================================================================
   const isCreator = projectData.creatorId === session.userId;
   const isAssigned = projectAssignments.some(a => a.userId === session.userId);
 
@@ -188,7 +186,6 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   }
 
   const canMutate = isGlobalOwner || isCreator || isAssigned;
-  // ==========================================================================
 
   return (
     <ProjectTabsContainer
@@ -210,12 +207,13 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           id: a.user.id,
           name: a.user.name,
           email: a.user.email,
+          avatarUrl: a.user.avatarUrl, // 🚀 FIXED: Pass the image straight down to child rosters
           role: computedRole, 
           department: computedDept, 
           status: "Active",
         };
       })}
-      activity={serializedActivityLogs} // 🚀 FIXED: Cleared duplicate syntax object initialization literal
+      activity={serializedActivityLogs}
       settings={{
         id: projectData.id,
         name: projectData.name,

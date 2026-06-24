@@ -3,18 +3,18 @@
 
 import React, { useState, useMemo, useTransition } from "react";
 import { Search, Folder, X, Clock, Edit3, Save, RotateCcw } from "lucide-react";
-import { updateTaskDetailsAction } from "@/app/actions/tasks"; // 🚀 IMPORTED YOUR TASK MUTATION SERVER ACTION
+import { updateTaskDetailsAction } from "@/app/actions/tasks"; 
 
 interface TaskItem {
   id: string;
-  projectId: string; // 🚀 ADDED TO INTERFACE
+  projectId: string; 
   title: string;
   description: string | null;
   status: "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
   priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   dueDate?: string | null;
   project: { name: string };
-  assignee: { name: string } | null;
+  assignee: { name: string; avatarUrl?: string | null } | null; // 🚀 FIXED: Added avatarUrl to assignee type structure
   assigneeId?: string | null; 
   creatorId: string;
 }
@@ -25,7 +25,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
 
-  // 🚀 INTERACTIVE EDIT BUFFER STATES
+  // INTERACTIVE EDIT BUFFER STATES
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -64,7 +64,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
     });
   }, [initialTasks, activeFilter, searchQuery, currentUserId]);
 
-  // Handle active row click - seed edit buffer records dynamically
   const handleTaskRowSelect = (task: TaskItem) => {
     setSelectedTask(task);
     setIsEditing(false);
@@ -75,7 +74,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
     setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : "");
   };
 
-  // Commit updated parameters right back to the data sync transactions
   const handleSaveInlineDrawer = () => {
     if (!selectedTask) return;
     if (!editTitle.trim()) {
@@ -89,7 +87,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
         projectId: selectedTask.projectId,
         title: editTitle,
         description: editDescription,
-        priority: editPriority === "CRITICAL" ? "URGENT" : editPriority, // Map client types into database schemas cleanly
+        priority: editPriority === "CRITICAL" ? "URGENT" : editPriority, 
         status: editStatus,
         dueDate: editDueDate || null,
       });
@@ -98,7 +96,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
         alert(res.error);
       } else {
         setIsEditing(false);
-        // Refresh local cache representation view layout metrics
         setSelectedTask({
           ...selectedTask,
           title: editTitle,
@@ -127,10 +124,10 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
   return (
     <div className="flex gap-6 w-full relative">
       
-      {/* LEFT HAND MASTER SIDE LAYOUT CONTENT COLUMN */}
+      {/* LEFT HAND MASTER COLUMN */}
       <div className="flex-1 space-y-4 font-sans text-neutral min-w-0">
         
-        {/* FILTER & CONTROL BAR LAYOUT */}
+        {/* FILTER & CONTROL BAR */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-base-100 p-3 border border-base-300 rounded-2xl shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-1">
             <div className="relative w-full sm:w-64">
@@ -160,7 +157,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
           </div>
         </div>
 
-        {/* TABLE LIST PORTAL LAYOUT SHEET */}
+        {/* TABLE LIST WORKSPACE */}
         <div className="card bg-base-100 border border-base-300 rounded-2xl overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
             <table className="table table-md w-full text-left">
@@ -176,14 +173,16 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
               </thead>
               <tbody className="divide-y divide-base-300/60 text-xs font-medium">
                 {filteredTasks.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-neutral/40 font-bold italic bg-base-100">
+                  <tr className="bg-base-100">
+                    <td colSpan={6} className="py-12 text-center text-neutral/40 font-bold italic">
                       No assigned tasks found matching this criteria view.
                     </td>
                   </tr>
                 ) : (
                   filteredTasks.map((task) => {
                     const isSelected = selectedTask?.id === task.id;
+                    const firstInitial = task.assignee?.name ? task.assignee.name.charAt(0).toUpperCase() : "?";
+
                     return (
                       <tr 
                         key={task.id} 
@@ -192,7 +191,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
                           isSelected ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-base-200/30"
                         }`}
                       >
-                        <td className="py-4 px-4 max-w-sm">
+                        <td className="py-4 px-4 max-w-sm text-left">
                           <p className="font-bold text-neutral truncate">{task.title}</p>
                           <p className="text-neutral/40 font-normal text-[11px] truncate mt-0.5">{task.description || "No description provided."}</p>
                         </td>
@@ -216,10 +215,15 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
                           {task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : "No Date"}
                         </td>
                         <td className="py-4 px-4">
+                          {/* 🚀 FIXED: Render user cloud profile avatars with standard initials text fallbacks inside the tasks data table */}
                           {task.assignee ? (
                             <div className="avatar placeholder" title={task.assignee.name}>
-                              <div className="bg-primary/10 text-primary border-2 border-base-100 text-[10px] font-black h-7 w-7 rounded-full flex items-center justify-center">
-                                <span>{task.assignee.name.charAt(0).toUpperCase()}</span>
+                              <div className="bg-neutral text-neutral-content rounded-full h-7 w-7 overflow-hidden flex items-center justify-center text-[10px] font-black border border-base-300/40 select-none">
+                                {task.assignee.avatarUrl ? (
+                                  <img src={task.assignee.avatarUrl} alt={`${task.assignee.name}'s task avatar`} className="object-cover w-full h-full" />
+                                ) : (
+                                  <span>{firstInitial}</span>
+                                )}
                               </div>
                             </div>
                           ) : (
@@ -236,14 +240,11 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
         </div>
       </div>
 
-      {/* RESPONSIVE SIDEBAR DETAIL DRAWER CONTEXT PANEL */}
+      {/* STICKY DETAILS SIDEBAR CONTEXT DRAWER */}
       {selectedTask && (
         <aside className="w-80 md:w-96 shrink-0 bg-base-100 border border-base-300 rounded-2xl p-4 shadow-xl z-10 flex flex-col h-fit sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto animate-fadeIn">
-          
-          {/* Drawer Top Row Actions bar */}
           <div className="flex items-start justify-between gap-4 pb-3 border-b border-base-200">
-            <div className="space-y-1 flex-1">
-              {/* 🚀 FIXED: Render inline toggle configuration loops */}
+            <div className="space-y-1 flex-1 text-left">
               {!isEditing ? (
                 <>
                   <span className={`badge badge-xs border rounded font-black text-[9px] px-1.5 py-1 ${getPriorityStyle(selectedTask.priority)}`}>
@@ -265,7 +266,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
             </div>
             
             <div className="flex items-center gap-1.5 shrink-0">
-              {/* 🚀 NEW: INLINE TASK MODIFICATION CONTROLS DRAWER SYSTEM PANEL */}
               {!isEditing ? (
                 <button
                   onClick={() => setIsEditing(true)}
@@ -303,10 +303,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
             </div>
           </div>
 
-          {/* Core Properties Summary Row Layout block */}
           <div className="py-4 space-y-4 text-xs">
-            
-            {/* WORKFLOW PHASE ADJUSTMENT */}
             <div className="flex items-center justify-between">
               <span className="text-neutral/40 font-bold uppercase text-[10px] tracking-wider">Workflow Stage</span>
               {!isEditing ? (
@@ -327,7 +324,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
               )}
             </div>
 
-            {/* PRIORITY SELECTION ADJUSTMENT */}
             <div className="flex items-center justify-between">
               <span className="text-neutral/40 font-bold uppercase text-[10px] tracking-wider">Priority Level</span>
               {!isEditing ? (
@@ -355,7 +351,6 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
               </span>
             </div>
 
-            {/* TARGET TIMELINE DEADLINE ADJUSTMENT */}
             <div className="flex items-center justify-between">
               <span className="text-neutral/40 font-bold uppercase text-[10px] tracking-wider">Due Window</span>
               {!isEditing ? (
@@ -372,8 +367,7 @@ export default function MyTasksViewContainer({ initialTasks, currentUserId }: { 
               )}
             </div>
 
-            {/* DESCRIPTION OBJECT OVERVIEW TEXTAREA */}
-            <div className="space-y-1 bg-base-200/40 p-2.5 rounded-xl border border-base-200 mt-1 flex flex-col">
+            <div className="space-y-1 bg-base-200/40 p-2.5 rounded-xl border border-base-200 mt-1 flex flex-col text-left">
               <span className="text-neutral/40 font-bold uppercase text-[9px] tracking-wider block">Description Overview</span>
               {!isEditing ? (
                 <p className="text-neutral/70 leading-relaxed font-medium text-[11px]">

@@ -8,7 +8,6 @@ import { validateMessagingBoundary } from "@/lib/messaging";
 import { revalidatePath } from "next/cache";
 import { OrgRole } from "@prisma/client";
 import { realtimeServer } from "@/lib/realtime";
-import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 
 interface SearchPayload {
@@ -60,7 +59,7 @@ export async function queryUserDirectory(searchQuery: string) {
           { email: { contains: cleanQuery, mode: "insensitive" } }
         ]
       },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, email: true, avatarUrl: true },
       take: 10,
     });
   }
@@ -82,7 +81,7 @@ export async function queryUserDirectory(searchQuery: string) {
         { email: { contains: cleanQuery, mode: "insensitive" } }
       ]
     },
-    select: { id: true, name: true, email: true },
+    select: { id: true, name: true, email: true, avatarUrl: true },
     take: 10,
   });
 }
@@ -100,7 +99,7 @@ export async function getOrCreatePrivateChat(senderId: string, targetUserId: str
         { participants: { some: { userId: targetUserId } } }
       ]
     },
-    include: { participants: { include: { user: { select: { id: true, name: true } } } } }
+    include: { participants: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } } }
   });
 
   if (existingChat) return existingChat;
@@ -116,7 +115,7 @@ export async function getOrCreatePrivateChat(senderId: string, targetUserId: str
         ]
       }
     },
-    include: { participants: { include: { user: { select: { id: true, name: true } } } } }
+    include: { participants: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } } }
   });
 }
 
@@ -175,7 +174,7 @@ export async function getCompanyDirectory(payload: SearchPayload) {
           { email: { contains: cleanSearch, mode: "insensitive" } }
         ]
       },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, email: true, avatarUrl: true },
       take: 20
     });
   }
@@ -195,6 +194,7 @@ export async function getCompanyDirectory(payload: SearchPayload) {
       id: true,
       name: true,
       email: true,
+      avatarUrl: true,
       memberships: {
         where: { organizationId },
         select: { role: true }
@@ -214,12 +214,11 @@ export async function getUserConversations(userId: string, organizationId: strin
       organizationId,
       participants: { some: { userId } }
     },
-    // 🚀 FIXED: Only relational fields are left here. Base fields are fetched automatically!
     include: {
       participants: {
         include: {
           user: {
-            select: { id: true, name: true, email: true }
+            select: { id: true, name: true, email: true, avatarUrl: true }
           }
         }
       },
@@ -239,25 +238,35 @@ export async function getUserConversations(userId: string, organizationId: strin
 export async function getConversationMessages(conversationId: string, userId: string) {
   try {
     await prisma.participant.updateMany({
-      where: {
-        conversationId,
-        userId
-      },
-      data: {
-        lastViewedAt: new Date() 
-      }
+      where: { conversationId, userId },
+      data: { lastViewedAt: new Date() }
     });
 
-    return await prisma.message.findMany({
+    const messages = await prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
-      include: { sender: { select: { id: true, name: true } } }
+      include: { sender: { select: { id: true, name: true, avatarUrl: true } } }
     });
+
+    // Map raw private storage paths to your proxy route
+    const securedMessages = messages.map((msg) => {
+      if (!msg.attachments || msg.attachments.length === 0) return msg;
+
+      return {
+        ...msg,
+        attachments: msg.attachments.map(
+          (rawUrl) => `/api/files?url=${encodeURIComponent(rawUrl)}`
+        ),
+      };
+    });
+
+    return securedMessages;
   } catch (error) {
     console.error("Failed to clear read status indexes:", error);
     return [];
   }
 }
+
 /**
  * ACTION: Computes the aggregate number of unread messages across all company rooms the user is a part of.
  */
@@ -372,7 +381,7 @@ export async function createGroupChatAction(payload: GroupChatPayload) {
 }
 
 /**
- * Dispatches a message entry transaction node, extracts mentions, and triggers layouts syncs.
+ * Dispatches a message entry transaction node, extracts mentions, and triggers layout syncs.
  */
 export async function sendMessage(conversationId: string, senderId: string, body: string, attachments: string[] = []) {
   const isParticipant = await prisma.participant.findUnique({
@@ -398,7 +407,7 @@ export async function sendMessage(conversationId: string, senderId: string, body
     const message = await tx.message.create({
       data: { conversationId, senderId, body, attachments },
       include: { 
-        sender: { select: { id: true, name: true, email: true } } 
+        sender: { select: { id: true, name: true, email: true, avatarUrl: true } } 
       }
     });
 
@@ -434,6 +443,7 @@ export async function sendMessage(conversationId: string, senderId: string, body
         senderId: message.senderId,
         createdAt: message.createdAt,
         conversationId: conversationId,
+        attachments: message.attachments, 
         sender: message.sender
       });
     } catch (realtimeError) {
@@ -442,37 +452,6 @@ export async function sendMessage(conversationId: string, senderId: string, body
 
     return message;
   });
-}
-
-/**
- * API ENDPOINT: Resolves a specific user's operational role within an organization.
- */
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const organizationId = searchParams.get("orgId");
-    const userId = searchParams.get("userId");
-
-    if (!organizationId || !userId) {
-      return NextResponse.json({ error: "Missing identity parameters" }, { status: 400 });
-    }
-
-    const membership = await prisma.membership.findUnique({
-      where: {
-        userId_organizationId: { userId, organizationId }
-      },
-      select: { role: true }
-    });
-
-    if (!membership) {
-      return NextResponse.json({ role: "EMPLOYEE" }, { status: 200 });
-    }
-
-    return NextResponse.json({ role: membership.role }, { status: 200 });
-  } catch (error) {
-    console.error("Failed to resolve membership metrics:", error);
-    return NextResponse.json({ error: "Internal processing failure" }, { status: 500 });
-  }
 }
 
 /**

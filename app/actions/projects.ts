@@ -1,3 +1,4 @@
+// app/actions/projects.ts
 "use server";
 
 import { prisma } from "@/lib/db";
@@ -10,6 +11,7 @@ export interface SearchableUser {
   id: string;
   name: string | null;
   email: string;
+  avatarUrl: string | null; // 🚀 FIXED: Added avatarUrl to type layout signature
 }
 
 async function verifyProjectMutationAccess(projectId: string, userId: string): Promise<{ authorized: boolean; error: string | null }> {
@@ -115,7 +117,6 @@ export async function updateProjectGeneralDetails(
       where: { userId: session.userId },
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Notify all teammates assigned to this project
     if (userMembership) {
       const activeTeammates = project.assignments.filter(a => a.userId !== session.userId);
       for (const teammate of activeTeammates) {
@@ -165,7 +166,6 @@ export async function archiveProjectWorkspace(
       where: { userId: session.userId },
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Notify teammates that the project workspace has been archived
     if (userMembership) {
       const activeTeammates = project.assignments.filter(a => a.userId !== session.userId);
       for (const teammate of activeTeammates) {
@@ -270,7 +270,6 @@ export async function assignUserToProject(projectId: string, targetEmail: string
       where: { userId: guard.session.userId },
     });
 
-    // 🚀 NOTIFICATION TRIGGER: Send real-time dashboard notification to the added user
     if (userMembership && projectContext) {
       await createNotificationAction({
         recipientId: targetUser.id,
@@ -302,10 +301,12 @@ export async function getSearchableUsers(): Promise<{ users?: SearchableUser[]; 
 
   try {
     const users = await prisma.user.findMany({
+      // 🚀 FIXED: Added avatarUrl to select block fields to provide active image endpoints
       select: {
         id: true,
         name: true,
         email: true,
+        avatarUrl: true
       },
       orderBy: {
         name: "asc",
@@ -333,7 +334,6 @@ export async function removeMemberFromProjectAction({ projectId, targetUserId }:
     const session = await getSession();
     if (!session) return { error: "Authentication required." };
 
-    // 1. Fetch the caller's global organization membership profile status
     const callerMembership = await prisma.membership.findFirst({
       where: { userId: session.userId },
     });
@@ -342,17 +342,14 @@ export async function removeMemberFromProjectAction({ projectId, targetUserId }:
     const isGlobalOwner = callerMembership.role === "OWNER";
     const isGlobalAdmin = callerMembership.role === "ADMIN";
 
-    // 2. Fetch the target project parameters to verify identity records
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { name: true, creatorId: true },
     });
     if (!project) return { error: "Target project does not exist." };
 
-    // 3. Enforce strict role boundary permission gates
     if (!isGlobalOwner) {
       if (isGlobalAdmin) {
-        // Admins MUST be assigned project participants to kick someone out
         const adminProjectAssignment = await prisma.assignment.findFirst({
           where: { projectId, userId: session.userId },
         });
@@ -360,14 +357,11 @@ export async function removeMemberFromProjectAction({ projectId, targetUserId }:
           return { error: "Access Gated: Admins must be assigned project participants to remove team members." };
         }
       } else {
-        // Employees and Guests are instantly rejected
         return { error: "Access Gated: You do not possess the required clearance level to evict participants." };
       }
     }
 
-    // 4. Run database mutations inside a safe Prisma transaction block
     await prisma.$transaction(async (tx) => {
-      // Step A: 🚀 PURGE ASSIGNED TASKS - Delete all tasks assigned to this user in this project
       await tx.task.deleteMany({
         where: {
           projectId,
@@ -375,7 +369,6 @@ export async function removeMemberFromProjectAction({ projectId, targetUserId }:
         },
       });
 
-      // Step B: Remove the project mapping association link row
       await tx.assignment.deleteMany({
         where: {
           projectId,
@@ -384,7 +377,6 @@ export async function removeMemberFromProjectAction({ projectId, targetUserId }:
       });
     });
 
-    // 5. 🚀 DISPATCH REAL-TIME NOTIFICATION to the evicted team member
     await createNotificationAction({
       recipientId: targetUserId,
       senderId: session.userId,

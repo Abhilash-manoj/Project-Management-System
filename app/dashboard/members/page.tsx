@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers"; 
 import MemberOnboardingForm from "./components/MemberOnboardingForm"; 
 import ShareLinkTerminal from "../components/ShareLinkTerminal"; 
-import MemberRosterRowControls from "./components/MemberRosterRowControls"; // 🚀 IMPORT THE INTERACTIVE ROW CONTROLS FOR INLINE CLICK MANAGEMENT
+import MemberRosterRowControls from "./components/MemberRosterRowControls"; 
 import { Users, KeyRound, Link as LinkIcon, Building } from "lucide-react"; 
 
 export default async function MembersManagementDashboardPage() {
@@ -56,6 +56,7 @@ export default async function MembersManagementDashboardPage() {
             id: true,
             name: true,
             email: true,
+            avatarUrl: true, // 🚀 FIXED: Added to pull the live cloud image link
           },
         },
       },
@@ -75,6 +76,7 @@ export default async function MembersManagementDashboardPage() {
             id: true,
             name: true,
             email: true,
+            avatarUrl: true, // 🚀 FIXED: Added to pull the live cloud image link
           },
         },
       },
@@ -113,14 +115,11 @@ export default async function MembersManagementDashboardPage() {
       })
     : [];
 
-  // ==========================================================================
   // 🌐 DETECT THE SYSTEM HOST NAME PREFIX DIRECTLY ON THE SERVER PAGE
-  // ==========================================================================
   const headersList = await headers();
   const activeHost = headersList.get("host") || "localhost:3000";
   const protocol = activeHost.includes("localhost") ? "http://" : "https://";
   const systemAbsoluteOrigin = `${protocol}${activeHost}`;
-  // ==========================================================================
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in font-sans">
@@ -149,7 +148,6 @@ export default async function MembersManagementDashboardPage() {
             <MemberOnboardingForm projectContextList={workspaceProjectsList} />
           </div>
         ) : (
-          /* Notice plate rendered explicitly to Employees/Guests explaining directory boundaries */
           <div className="card bg-base-100 border border-base-300 p-5 space-y-3 text-neutral/60 shadow-xs text-left">
             <div className="flex items-center gap-2 text-warning">
               <KeyRound className="h-4 w-4 stroke-[2.5]" />
@@ -176,60 +174,77 @@ export default async function MembersManagementDashboardPage() {
                   No visible organization colleagues found within your project perimeters.
                 </p>
               ) : (
-                activeTeamMembers.map((member) => (
-                  <div key={member.id} className="p-3.5 flex items-center justify-between text-sm font-medium hover:bg-base-100 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="avatar placeholder">
-                        <div className="h-8 w-8 bg-primary/10 text-primary font-bold rounded-full border border-primary/20 flex items-center justify-center text-xs select-none">
-                          <span>{member.user.name.charAt(0).toUpperCase()}</span>
-                        </div>
-                      </div>
-                      <div className="text-left">
-                        <div className="flex items-center gap-2">
-                          <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
-                          {/* Status Bubble Tag Element Indicator */}
-                          <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.2 border ${
-                            member.status === "INACTIVE" 
-                              ? "bg-error/10 text-error border-error/20" 
-                              : "bg-success/10 text-success border-success/20"
-                          }`}>
-                            {member.status || "ACTIVE"}
-                          </span>
-                        </div>
-                        <p className="text-xs text-neutral/40 font-semibold leading-tight">{member.user.email}</p>
-                        
-                        {/* Dynamic plain text department render string with high-visibility fallback tag */}
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-neutral/40 flex items-center gap-1 mt-1 select-none">
-                          <Building className="h-3 w-3 text-neutral/30 stroke-[2.2]" /> 
-                          {member.department && member.department.trim() !== "" ? (
-                            <span className="text-primary font-black">{member.department} Division</span>
-                          ) : (
-                            <span className="italic opacity-50 font-semibold">Unassigned</span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      <span className="badge bg-base-200 border border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
-                        {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
-                        {member.role}
-                      </span>
+                activeTeamMembers.map((member) => {
+                  const initials = member.user.name
+                    .split(" ")
+                    .map((n: string) => n[0])
+                    .join("")
+                    .toUpperCase()
+                    .substring(0, 2);
 
-                      {/* EMBEDDED CONTROL TRIGGER PANEL SLOT */}
-                      <MemberRosterRowControls 
-                        targetUser={{
-                          id: member.user.id,
-                          name: member.user.name,
-                          role: member.role,
-                          status: member.status || "ACTIVE"
-                        }}
-                        currentUserId={session.userId}
-                        currentUserOrgRole={membership.role}
-                      />
+                  return (
+                    <div key={member.id} className="p-3.5 flex items-center justify-between text-sm font-medium hover:bg-base-100 transition-colors">
+                      <div className="flex items-center gap-3">
+                        
+                        {/* 🚀 FIXED: RENDER USER AVATAR WITH SYSTEM INITIALS FALLBACK */}
+                        <div className="avatar placeholder shrink-0">
+                          <div className="h-8 w-8 bg-neutral text-neutral-content font-bold rounded-full overflow-hidden flex items-center justify-center text-xs select-none ring-1 ring-base-300">
+                            {member.user.avatarUrl ? (
+                              <img 
+                                src={member.user.avatarUrl} 
+                                alt={`${member.user.name}'s profile photo`} 
+                                className="object-cover w-full h-full"
+                              />
+                            ) : (
+                              <span>{initials}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-left">
+                          <div className="flex items-center gap-2">
+                            <p className="text-neutral font-bold tracking-tight">{member.user.name}</p>
+                            <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.2 border ${
+                              member.status === "INACTIVE" 
+                                ? "bg-error/10 text-error border-error/20" 
+                                : "bg-success/10 text-success border-success/20"
+                            }`}>
+                              {member.status || "ACTIVE"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-neutral/40 font-semibold leading-tight">{member.user.email}</p>
+                          
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-neutral/40 flex items-center gap-1 mt-1 select-none">
+                            <Building className="h-3 w-3 text-neutral/30 stroke-[2.2]" /> 
+                            {member.department && member.department.trim() !== "" ? (
+                              <span className="text-primary font-black">{member.department} Division</span>
+                            ) : (
+                              <span className="italic opacity-50 font-semibold">Unassigned</span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        <span className="badge bg-base-200 border border-base-300 text-neutral/60 badge-sm font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide flex items-center gap-1">
+                          {member.role === "OWNER" || member.role === "ADMIN" ? "🛡️" : "👤"}
+                          {member.role}
+                        </span>
+
+                        <MemberRosterRowControls 
+                          targetUser={{
+                            id: member.user.id,
+                            name: member.user.name,
+                            role: member.role,
+                            status: member.status || "ACTIVE"
+                          }}
+                          currentUserId={session.userId}
+                          currentUserOrgRole={membership.role}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

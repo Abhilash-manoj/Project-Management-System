@@ -20,7 +20,6 @@ export default async function HomeDashboardPage() {
   const orgId = membership.organizationId;
   const currentTimestamp = new Date();
   
-  // 🚀 FIXED: Extract the raw text department string securely with a strong server-side fallback
   const currentDepartmentString = membership.department && membership.department.trim() !== "" 
     ? membership.department.trim() 
     : "Unassigned";
@@ -36,7 +35,7 @@ export default async function HomeDashboardPage() {
     completedTasksCount,
     overdueTasksCount,
     activeProjects,
-    completedProjectsCount, // Added target project count aggregation pass for admins
+    completedProjectsCount,
     projectList,
     taskStatusGroupings
   ] = await Promise.all([
@@ -76,7 +75,7 @@ export default async function HomeDashboardPage() {
       }
     }),
 
-    // E. Count Closed/Completed Projects (Used strictly for Admin metric cards)
+    // E. Count Closed/Completed Projects
     prisma.project.count({
       where: {
         organizationId: orgId,
@@ -90,9 +89,8 @@ export default async function HomeDashboardPage() {
         organizationId: orgId, 
         status: "ACTIVE",
         AND: [
-          // Limit overview visibility rules exactly based on user role
           isGlobalOwner
-            ? {} // Owners bypass view filters completely
+            ? {} 
             : isGlobalAdmin
             ? {
                 OR: [
@@ -101,7 +99,6 @@ export default async function HomeDashboardPage() {
                 ]
               }
             : {
-                // Employees & Guests can ONLY see public projects, or private ones they are assigned to
                 OR: [
                   { visibility: "PUBLIC" },
                   {
@@ -119,7 +116,17 @@ export default async function HomeDashboardPage() {
       take: 3,
       orderBy: { createdAt: "desc" },
       include: {
-        assignments: { include: { user: { select: { name: true } } } },
+        // 🚀 FIXED: Modified the relational query to explicitly grab avatarUrl fields live from the database
+        assignments: { 
+          include: { 
+            user: { 
+              select: { 
+                name: true,
+                avatarUrl: true 
+              } 
+            } 
+          } 
+        },
         tasks: { select: { status: true } }
       }
     }),
@@ -135,7 +142,7 @@ export default async function HomeDashboardPage() {
     })
   ]);
 
-  // 4. MAP STATUS ARRAY WITH STRING SANITIZATION (Fixes Chart Mismatches)
+  // 4. MAP STATUS ARRAY WITH STRING SANITIZATION
   const distribution = { TODO: 0, IN_PROGRESS: 0, IN_REVIEW: 0, DONE: 0 };
   
   taskStatusGroupings.forEach(group => {
@@ -148,11 +155,9 @@ export default async function HomeDashboardPage() {
     }
   });
 
-  // Calculate global task completions for the ring chart indicator
   const totalTasks = distribution.TODO + distribution.IN_PROGRESS + distribution.IN_REVIEW + distribution.DONE;
   const progressPercentage = totalTasks > 0 ? Math.round((distribution.DONE / totalTasks) * 100) : 0;
 
-  // 5. FORMAT ACTIVE SYSTEM DATETIME STAMP FOR HEADER
   const liveDisplayDate = currentTimestamp.toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -165,12 +170,10 @@ export default async function HomeDashboardPage() {
       
       {/* GREETING HERO BANNER OVERHAUL */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary to-blue-600 p-6 md:p-8 text-primary-content shadow-md border border-primary/10 flex flex-col md:flex-row md:items-center md:justify-between gap-6 select-none">
-        {/* Background Decorative Abstract Blur Elements */}
         <div className="absolute top-0 right-0 -mt-12 -mr-12 w-48 h-48 rounded-full bg-white/5 blur-2xl pointer-events-none" />
         <div className="absolute bottom-0 right-1/4 -mb-16 w-64 h-64 rounded-full bg-blue-400/10 blur-3xl pointer-events-none" />
 
         <div className="space-y-2 z-10 text-left max-w-xl">
-          {/* 🚀 FIXED: Renders the custom text department title cleanly above user's full name line layout */}
           <div className="inline-flex items-center gap-1.5 bg-white/10 border border-white/10 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-xs text-white">
             👋 {currentDepartmentString} Division
           </div>
@@ -186,7 +189,6 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* Wrapped Date in a high-contrast high-visibility translucent glass pill box */}
         <div className="z-10 shrink-0 self-start md:self-center">
           <div className="flex items-center gap-2.5 bg-neutral-950/20 border border-white/10 px-4 py-2.5 rounded-xl shadow-xs backdrop-blur-md">
             <div className="bg-white/10 p-1.5 rounded-lg border border-white/10">
@@ -202,10 +204,8 @@ export default async function HomeDashboardPage() {
         </div>
       </div>
 
-      {/* METRIC CARD STATS MATRIX GRID CONTAINER */}
+      {/* METRIC CARD STATS MATRIX GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        {/* Metric 1: Assigned Tasks */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
             <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">Assigned Tasks</span>
@@ -217,7 +217,6 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* Metric 2: Completed Projects vs Tasks */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
             <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">
@@ -235,7 +234,6 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* Metric 3: Overdue Tasks */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
             <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">Overdue Tasks</span>
@@ -249,7 +247,6 @@ export default async function HomeDashboardPage() {
           </div>
         </div>
 
-        {/* Metric 4: Active Projects */}
         <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl flex flex-row justify-between items-center shadow-2xs">
           <div className="space-y-1">
             <span className="text-[10px] font-black tracking-wider uppercase text-base-content/40 block">Active Projects</span>
@@ -260,7 +257,6 @@ export default async function HomeDashboardPage() {
             <Folder className="h-5 w-5" />
           </div>
         </div>
-
       </div>
 
       {/* LOWER CONTENT: PROJECT OVERVIEWS & DISTRIBUTION BLOCK TRACKERS */}
@@ -296,17 +292,29 @@ export default async function HomeDashboardPage() {
                     <progress className="progress progress-primary w-full h-1.5 rounded-full" value={projectProgress} max="100"></progress>
                   </div>
 
-                  {/* Avatar Initials list row map */}
+                  {/* 🚀 FIXED: RENDER RENDER USER REAL-TIME AVATAR CLOUD MAPPINGS WITH INITIALS FALLBACK */}
                   <div className="flex -space-x-2 overflow-hidden pt-1">
-                    {project.assignments.map((assignee, index) => (
-                      <div 
-                        key={index} 
-                        className="inline-block h-6 w-6 rounded-full ring-2 ring-base-100 bg-neutral text-neutral-content font-black text-[9px] flex items-center justify-center border border-base-300 uppercase select-none"
-                        title={assignee.user.name}
-                      >
-                        {assignee.user.name.charAt(0)}
-                      </div>
-                    ))}
+                    {project.assignments.map((assignment, index) => {
+                      const firstInitial = assignment.user.name.charAt(0).toUpperCase();
+
+                      return (
+                        <div 
+                          key={index} 
+                          className="inline-block h-6 w-6 rounded-full ring-2 ring-base-100 bg-neutral text-neutral-content font-black text-[9px] flex items-center justify-center border border-base-300 uppercase select-none overflow-hidden"
+                          title={assignment.user.name}
+                        >
+                          {assignment.user.avatarUrl ? (
+                            <img 
+                              src={assignment.user.avatarUrl} 
+                              alt={`${assignment.user.name}'s avatar profile`} 
+                              className="object-cover w-full h-full"
+                            />
+                          ) : (
+                            <span>{firstInitial}</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -334,7 +342,6 @@ export default async function HomeDashboardPage() {
               </div>
             </div>
 
-            {/* Complete Data Breakdown Lists */}
             <div className="w-full space-y-2 pt-2 border-t border-base-300/60">
               <div className="flex justify-between text-xs font-bold items-center">
                 <span className="flex items-center gap-2">

@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { decryptSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-// 🔒 FIXED: Pointing explicitly to your updated search-enabled component
 import ChatWorkspaceCanvas from "./components/ChatWorkSpaceCanvas";
 
 /**

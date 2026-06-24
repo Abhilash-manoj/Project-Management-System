@@ -8,6 +8,7 @@ import Link from "next/link";
 interface MemberAvatar {
   id: string;
   initials: string;
+  avatarUrl?: string | null; // 🚀 FIXED: Added optional property for real-time photo rendering
 }
 
 interface ProjectData {
@@ -49,7 +50,7 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
   return (
     <div className="space-y-6 text-neutral text-left select-none p-1">
       
-      {/* 1. TOP HERO BANNER (Semantic Theme Gradients Integration) */}
+      {/* 1. TOP HERO BANNER */}
       <div className="card bg-gradient-to-r from-primary to-primary-focus text-primary-content shadow-xl rounded-2xl p-6 relative overflow-hidden">
         <div className="flex justify-between items-start z-10 relative">
           <div className="space-y-1">
@@ -111,7 +112,7 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
       {/* 3. CORE TWO-COLUMN WORKSPACE VIEW */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* COLUMN LEFT: REAL TIME PROJECTS SUB-SYSTEM LISTS */}
+        {/* COLUMN LEFT: PROJECTS OVERVIEW */}
         <div className="lg:col-span-2 space-y-4">
           <div className="card bg-base-100 border border-base-300 shadow-sm p-5 rounded-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-base-300 pb-3">
@@ -139,10 +140,22 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
                     <progress className="progress progress-primary h-1.5 w-full bg-base-300" value={proj.progress} max="100" />
                   </div>
 
+                  {/* 🚀 FIXED: DYNAMIC AVATAR RENDERING FOR PROJECT MEMBERS */}
                   <div className="flex -space-x-1.5 overflow-hidden pt-1">
                     {proj.members.slice(0, 4).map((member) => (
-                      <div key={member.id} className="avatar placeholder border border-base-100 rounded-full h-5 w-5 text-[8px] font-black flex items-center justify-center bg-neutral text-neutral-content">
-                        <span>{member.initials}</span>
+                      <div 
+                        key={member.id} 
+                        className="avatar placeholder border border-base-100 rounded-full h-5 w-5 text-[8px] font-black flex items-center justify-center bg-neutral text-neutral-content overflow-hidden ring-1 ring-base-300"
+                      >
+                        {member.avatarUrl ? (
+                          <img 
+                            src={member.avatarUrl} 
+                            alt="Teammate avatar" 
+                            className="object-cover w-full h-full"
+                          />
+                        ) : (
+                          <span>{member.initials}</span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -154,8 +167,6 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
 
         {/* COLUMN RIGHT: DISTRIBUTION ANALYTICS & CALENDAR TICKERS */}
         <div className="space-y-4">
-          
-          {/* Radial Metrics Card */}
           <div className="card bg-base-100 border border-base-300 shadow-sm p-5 rounded-2xl space-y-4">
             <h3 className="font-black text-sm text-base-content uppercase tracking-wider border-b border-base-300 pb-2">Task Distribution</h3>
             <div className="flex items-center justify-around gap-2 pt-2">
@@ -171,7 +182,6 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
             </div>
           </div>
 
-          {/* Upcoming Agenda Calendar Feed */}
           <div className="card bg-base-100 border border-base-300 shadow-sm p-5 rounded-2xl space-y-3">
             <h3 className="font-black text-sm text-base-content uppercase tracking-wider border-b border-base-300 pb-2 flex items-center gap-1.5">
               <Activity className="h-4 w-4 text-primary" /> Upcoming Deadlines
@@ -194,11 +204,9 @@ export default function DashboardClientLayout({ userName, orgName, userRole, sum
               )}
             </div>
           </div>
-
         </div>
 
       </div>
-
     </div>
   );
 }

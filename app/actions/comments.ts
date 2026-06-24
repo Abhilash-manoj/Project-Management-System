@@ -6,17 +6,21 @@ import { getSession } from "./auth";
 import { verifyProjectAccess } from "@/lib/rbac";
 import { createNotificationAction } from "./notifications";
 import { revalidatePath } from "next/cache";
+import { getDownloadUrl } from "@vercel/blob";
 
 /**
- * ACTION: Appends a text comment to a specific task card.
+ * ACTION: Appends a text comment or file upload attachment to a specific task card.
  */
-export async function createTaskComment(taskId: string, body: string) {
+export async function createTaskComment(taskId: string, body: string, attachments: string[] = []) {
   try {
     const session = await getSession();
     if (!session) return { error: "Authentication required." };
 
     const cleanBody = body.trim();
-    if (!cleanBody) return { error: "Comment text cannot be empty." };
+    // Validate that there is either text body OR an uploaded file attachment present
+    if (!cleanBody && attachments.length === 0) {
+      return { error: "Comment context cannot be entirely empty." };
+    }
 
     // 1. Fetch task to discover parent projectId context before allowing any action
     const targetTaskContext = await prisma.task.findUnique({
@@ -40,9 +44,10 @@ export async function createTaskComment(taskId: string, body: string) {
         body: cleanBody,
         taskId,
         authorId: session.userId,
+        attachments, // Save the secure file array directly to your schema matching your frontend contract
       },
       include: {
-        author: { select: { name: true } },
+        author: { select: { name: true, avatarUrl: true } },
         task: { select: { title: true, creatorId: true, assigneeId: true, projectId: true } }
       }
     });
@@ -54,7 +59,7 @@ export async function createTaskComment(taskId: string, body: string) {
 
     if (userMembership) {
       const orgId = userMembership.organizationId;
-      const snippet = cleanBody.length > 40 ? `${cleanBody.substring(0, 40)}...` : cleanBody;
+      const snippet = cleanBody.length > 40 ? `${cleanBody.substring(0, 40)}...` : cleanBody || "Shared an attachment file";
 
       // NOTIFICATION SYSTEM 1: Alert the Task Creator if someone else comments
       if (comment.task.creatorId !== session.userId) {
@@ -91,14 +96,13 @@ export async function createTaskComment(taskId: string, body: string) {
 }
 
 /**
- * ACTION: Gathers all historical comments for a specific task card.
+ * ACTION: Gathers all historical comments for a specific task card and applies secure tokens.
  */
 export async function getTaskComments(taskId: string) {
   try {
     const session = await getSession();
     if (!session) return [];
 
-    // 1. Discover target parent projectId context for read gating operations
     const targetTaskContext = await prisma.task.findUnique({
       where: { id: taskId },
       select: { projectId: true }
@@ -106,22 +110,32 @@ export async function getTaskComments(taskId: string) {
 
     if (!targetTaskContext) return [];
 
-    // 🛡️ SECURITY CHECK: Read-gate comment retrieval logs based on project tracking assignments
     const guard = await verifyProjectAccess(targetTaskContext.projectId);
     if (!guard.authorized) return [];
 
-    return await prisma.comment.findMany({
+    const comments = await prisma.comment.findMany({
       where: { taskId },
       orderBy: { createdAt: "asc" },
       include: {
         author: {
-          select: {
-            id: true,
-            name: true,
-          }
+          select: { id: true, name: true, avatarUrl: true }
         }
       }
     });
+
+    // Map raw private asset links to your internal secure file proxy route
+    const securedComments = comments.map((comment) => {
+      if (!comment.attachments || comment.attachments.length === 0) return comment;
+
+      return {
+        ...comment,
+        attachments: comment.attachments.map(
+          (rawUrl) => `/api/files?url=${encodeURIComponent(rawUrl)}`
+        ),
+      };
+    });
+
+    return securedComments;
   } catch (error) {
     console.error("Failed to fetch task comments:", error);
     return [];

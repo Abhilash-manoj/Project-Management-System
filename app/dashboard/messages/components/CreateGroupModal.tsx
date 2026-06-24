@@ -2,8 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from 'react';
-import { createGroupChatAction } from '@/app/actions/communication';
-import { getCompanyDirectory } from '@/app/actions/communication';
+import { createGroupChatAction, getCompanyDirectory } from '@/app/actions/communication';
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -72,6 +71,9 @@ export default function CreateGroupModal({
     });
   };
 
+  const getInitials = (name: string) => 
+    name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '??';
+
   if (!isOpen) return null;
 
   return (
@@ -113,7 +115,23 @@ export default function CreateGroupModal({
                       onChange={() => handleToggleUserSelection(user.id)}
                       className="checkbox checkbox-primary checkbox-xs rounded-md"
                     />
-                    <div className="flex flex-col min-w-0">
+                    
+                    {/* 🚀 FIXED: Render live profile avatar elements next to coworker invite rows */}
+                    <div className="avatar placeholder shrink-0">
+                      <div className="h-6 w-6 bg-neutral text-neutral-content font-bold rounded-full overflow-hidden flex items-center justify-center text-[9px] border border-base-300/40">
+                        {user.avatarUrl ? (
+                          <img 
+                            src={user.avatarUrl} 
+                            alt={`${user.name}'s invite avatar`} 
+                            className="object-cover w-full h-full" 
+                          />
+                        ) : (
+                          <span>{getInitials(user.name)}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col min-w-0 flex-1">
                       <span className="text-xs font-semibold truncate text-base-content">{user.name}</span>
                     </div>
                   </label>

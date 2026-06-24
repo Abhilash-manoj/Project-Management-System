@@ -2,14 +2,15 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useTransition } from 'react';
-import { getUserConversations, sendMessage, getOrCreatePrivateChat, deleteMessageAction, getCompanyDirectory } from '@/app/actions/communication';
-import { getConversationMessages } from '@/app/actions/communication';
-import { searchCompanyDirectory, getMembershipRoleAction } from '@/app/actions/directory'; 
+import { getUserConversations, sendMessage, getOrCreatePrivateChat, deleteMessageAction, getConversationMessages } from '@/app/actions/communication';
+import { searchCompanyDirectory } from '@/app/actions/directory'; // 🚀 FIXED: Removed old getMembershipRoleAction import reference
 import CreateGroupModal from "./CreateGroupModal";
 import GroupInfoSidebar from "./GroupInfoSidebar"; 
+import MessageAttachmentButton from "./MessageAttachmentButton";
+import AttachmentPreviewList from "./Attachmentpreviewlist"; // 🚀 FIXED: Standardized case-sensitivity path naming to match components specs
 import PusherClient from 'pusher-js';
 import { MentionsInput, Mention } from 'react-mentions'; 
-import { Info } from 'lucide-react'; 
+import { Info, Download, FileText } from 'lucide-react'; 
 
 interface ChatWorkspaceCanvasProps {
   currentUserId: string;
@@ -22,6 +23,7 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
   const [activeChatMessages, setActiveChatMessages] = useState<any[]>([]);
   
   const [messageText, setMessageText] = useState<string>('');
+  const [attachments, setAttachments] = useState<{ url: string; name: string }[]>([]); 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
@@ -34,7 +36,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
   const scrollRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Sync rooms list view configurations
   const refreshWorkspaceChats = async (selectChatId: string | null = null) => {
     try {
       const liveRooms = await getUserConversations(currentUserId, organizationId);
@@ -56,16 +57,24 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     refreshWorkspaceChats(null);
 
     async function resolveActiveWorkspacePermissions() {
-      const result = await getMembershipRoleAction(currentUserId, organizationId);
-      if (result?.role) {
-        setUserRole(result.role);
+      try {
+        // 🚀 FIXED: Direct dynamic fetch handshake targeting the new micro-route endpoint
+        const response = await fetch(`/api/membership?orgId=${organizationId}&userId=${currentUserId}`);
+        if (!response.ok) throw new Error("HTTP Handshake failed");
+        
+        const result = await response.json();
+        if (result?.role) {
+          setUserRole(result.role);
+        }
+      } catch (err) {
+        console.error("Failed to resolve dynamic workspace permissions, falling back to lower privileges:", err);
+        setUserRole("EMPLOYEE");
       }
     }
     
     resolveActiveWorkspacePermissions();
   }, [currentUserId, organizationId]);
 
-  // Handle clearing unread badges and fetching chat history
   useEffect(() => {
     if (!activeChatId) return;
 
@@ -83,10 +92,9 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     }
 
     loadActiveChannelMessages();
+    setAttachments([]); 
   }, [activeChatId, currentUserId]);
 
-  // 🚀 FIXED: Leak-proof Pusher sync event block. 
-  // It unbinds and kills active connection pools when dependencies switch or tabs unmount.
   useEffect(() => {
     if (conversations.length === 0) return;
 
@@ -101,7 +109,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
       const channel = pusher.subscribe(targetChannel);
       activeSubscriptions.push(targetChannel);
       
-      // Live message insertion handler
       channel.bind("new-message", (incomingMessage: any) => {
         if (chat.id === activeChatId) {
           setActiveChatMessages((prev) => {
@@ -129,7 +136,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
         });
       });
 
-      // Live dynamic deletion handler stream listener
       channel.bind("message-deleted", (data: { messageId: string }) => {
         if (chat.id === activeChatId) {
           setActiveChatMessages((prev) => prev.filter(msg => msg.id !== data.messageId));
@@ -138,14 +144,13 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
       });
     });
 
-    // 🚀 CRITICAL CLEANUP ENGINE ROUTINE
     return () => {
       activeSubscriptions.forEach(channelName => {
         pusher.unsubscribe(channelName);
       });
-      pusher.disconnect(); // Explicitly close the WebSocket thread right away
+      pusher.disconnect(); 
     };
-  }, [conversations.map(c => c.id).join(','), activeChatId, currentUserId]); // String serialized tracking layout
+  }, [conversations.map(c => c.id).join(','), activeChatId, currentUserId]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -164,11 +169,14 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
 
   const handleMessageDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageText.trim() || !activeChatId) return;
+    if ((!messageText.trim() && attachments.length === 0) || !activeChatId) return;
 
     const targetedChatId = activeChatId;
     const bodyContent = messageText.trim();
+    const targetFileUrls = attachments.map(a => a.url);
+
     setMessageText('');
+    setAttachments([]); 
 
     const temporaryLocalEchoId = `temp-${Date.now()}`;
     const optimisticEchoPayload = {
@@ -176,14 +184,20 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
       body: bodyContent,
       senderId: currentUserId,
       createdAt: new Date(),
-      sender: { id: currentUserId, name: "You" }
+      attachments: targetFileUrls, 
+      sender: { id: currentUserId, name: "You", avatarUrl: previewUrlFallback() }
     };
     
     setActiveChatMessages(prev => [...prev, optimisticEchoPayload]);
 
+    function previewUrlFallback() {
+      const activeMe = conversations.flatMap(c => c.participants).find(p => p?.user?.id === currentUserId);
+      return activeMe?.user?.avatarUrl || null;
+    }
+
     startTransition(async () => {
       try {
-        await sendMessage(targetedChatId, currentUserId, bodyContent, []);
+        await sendMessage(targetedChatId, currentUserId, bodyContent, targetFileUrls);
       } catch (error) {
         console.error("Message process breakdown:", error);
         setActiveChatMessages(prev => prev.filter(m => m.id !== temporaryLocalEchoId));
@@ -240,7 +254,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     return () => document.removeEventListener("mousedown", clickBoundaryCheck);
   }, []);
 
-  // REGEX PARSER AND RENDERER FOR CHAT BUBBLES
   const renderMessageContentWithHighlights = (textBody: string, isMe: boolean) => {
     if (!textBody) return "";
     const mentionRegex = /@\[([^\]]+)\]\(([^)]+)\)/g;
@@ -278,6 +291,22 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     return segments.length > 0 ? segments : textBody;
   };
 
+  const isImageUrl = (url: string) => {
+    const cleanUrl = url.split(/[?#]/)[0];
+    return /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(cleanUrl);
+  };
+
+  const getFileNameFromUrl = (url: string) => {
+    try {
+      const decoded = decodeURIComponent(url);
+      const parts = decoded.split('/');
+      const lastPart = parts[parts.length - 1];
+      return lastPart.replace(/^\d+-/, ''); 
+    } catch {
+      return "Linked Shared Document File";
+    }
+  };
+
   const cleanPreviewText = (text: string) => {
     if (!text) return "No messages yet";
     return text.replace(/@\[([^\]]+)\]\(([^)]+)\)/g, '@$1');
@@ -296,6 +325,8 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
         display: p.user.name,
       }))
     : [];
+
+  const peerUserObject = currentChat?.participants?.find((p: any) => p.user.id !== currentUserId)?.user;
 
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden border border-base-300 bg-base-100 text-base-content rounded-box text-left">
@@ -320,16 +351,30 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
               {searchResults.length === 0 ? (
                 <div className="p-2 text-xs opacity-50 text-center">No teammates found</div>
               ) : (
-                searchResults.map(user => (
-                  <button
-                    key={user.id}
-                    onClick={() => handleSelectUserToChat(user.id)}
-                    className="w-full text-left p-2 hover:bg-base-200 rounded-btn text-xs flex flex-col"
-                  >
-                    <span className="font-semibold">{user.name}</span>
-                    <span className="opacity-50 text-[10px]">{user.email}</span>
-                  </button>
-                ))
+                searchResults.map(user => {
+                  const searchInitials = getInitials(user.name);
+                  return (
+                    <button
+                      key={user.id}
+                      onClick={() => handleSelectUserToChat(user.id)}
+                      className="w-full text-left p-1.5 hover:bg-base-200 rounded-btn text-xs flex items-center gap-2.5"
+                    >
+                      <div className="avatar placeholder shrink-0">
+                        <div className="h-7 w-7 bg-neutral text-neutral-content font-bold rounded-full overflow-hidden flex items-center justify-center text-[10px] border border-base-300">
+                          {user.avatarUrl ? (
+                            <img src={user.avatarUrl} alt={`${user.name}'s lookups`} className="object-cover w-full h-full" />
+                          ) : (
+                            <span>{searchInitials}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-semibold truncate">{user.name}</span>
+                        <span className="opacity-50 text-[10px] truncate">{user.email}</span>
+                      </div>
+                    </button>
+                  );
+                })
               )}
             </div>
           )}
@@ -345,13 +390,20 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                 const isSelected = chat.id === activeChatId;
                 return (
                   <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`p-2 rounded-btn cursor-pointer transition-colors flex items-center gap-3 relative ${isSelected ? 'bg-primary text-primary-content font-medium shadow-sm' : 'hover:bg-base-200/60'}`}>
-                    <div className="avatar placeholder placeholder-xs">
-                      <div className="bg-neutral text-neutral-content rounded-full w-8 h-8 text-xs flex items-center justify-center"><span>{getInitials(peer?.name || 'User')}</span></div>
+                    
+                    <div className="avatar placeholder placeholder-xs shrink-0">
+                      <div className="bg-neutral text-neutral-content font-bold rounded-full w-8 h-8 text-xs flex items-center justify-center overflow-hidden border border-base-300/30">
+                        {peer?.avatarUrl ? (
+                          <img src={peer.avatarUrl} alt={peer.name} className="object-cover w-full h-full" />
+                        ) : (
+                          <span>{getInitials(peer?.name || 'User')}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex-1 min-w-0 pr-6">
                       <div className="text-xs font-semibold truncate">{peer?.name || 'Team Member'}</div>
                       <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
-                        {cleanPreviewText(chat.messages?.[0]?.body)}
+                        {cleanPreviewText(chat.messages?.[0]?.body || (chat.messages?.[0]?.attachments?.length ? "📁 Shared attachment file" : ""))}
                       </p>
                     </div>
                     
@@ -371,19 +423,19 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
             <div className="text-[10px] font-bold uppercase tracking-wider text-base-content/40 px-2 mb-1">Group Channels</div>
             <div className="space-y-0.5">
               {groupChannels.length === 0 ? (
-                <div className="p-2 text-[11px] opacity-40 italic px-2">No group channels created yet.</div>
+                <div className="p-2 text-p-2 text-[11px] opacity-40 italic px-2">No group channels created yet.</div>
               ) : (
                 groupChannels.map((chat) => {
                   const isSelected = chat.id === activeChatId;
                   return (
                     <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className={`p-2 rounded-btn cursor-pointer transition-colors flex items-center gap-3 relative ${isSelected ? 'bg-primary text-primary-content font-medium shadow-sm' : 'hover:bg-base-200/60'}`}>
-                      <div className="avatar placeholder placeholder-xs">
+                      <div className="avatar placeholder placeholder-xs shrink-0">
                         <div className="bg-base-300 text-base-content rounded-md w-8 h-8 text-xs font-bold flex items-center justify-center"><span>#</span></div>
                       </div>
                       <div className="flex-1 min-w-0 pr-6">
                         <div className="text-xs font-semibold truncate">{chat.name || "Unnamed Channel"}</div>
                         <p className={`text-[11px] truncate ${isSelected ? 'opacity-80' : 'opacity-60'}`}>
-                          {cleanPreviewText(chat.messages?.[0]?.body)}
+                          {cleanPreviewText(chat.messages?.[0]?.body || (chat.messages?.[0]?.attachments?.length ? "📁 Shared attachment file" : ""))}
                         </p>
                       </div>
 
@@ -407,11 +459,20 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
           <>
             <div className="p-4 border-b border-base-300 bg-base-100 flex items-center justify-between shadow-sm z-10">
               <div className="flex items-center gap-3">
-                <div className="avatar placeholder">
-                  <div className="bg-neutral text-neutral-content rounded-full w-9 h-9 text-xs flex items-center justify-center"><span>{currentChat.isGroup ? '#' : getInitials(currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name)}</span></div>
+                
+                <div className="avatar placeholder shrink-0">
+                  <div className="bg-neutral text-neutral-content font-bold rounded-full w-9 h-9 text-xs flex items-center justify-center overflow-hidden border border-base-300">
+                    {currentChat.isGroup ? (
+                      <span>#</span>
+                    ) : peerUserObject?.avatarUrl ? (
+                      <img src={peerUserObject.avatarUrl} alt={peerUserObject.name} className="object-cover w-full h-full" />
+                    ) : (
+                      <span>{getInitials(peerUserObject?.name || 'User')}</span>
+                    )}
+                  </div>
                 </div>
                 <div>
-                  <span className="font-bold text-base text-base-content block leading-none">{currentChat.isGroup ? currentChat.name : currentChat.participants.find((p: any) => p.user.id !== currentUserId)?.user.name}</span>
+                  <span className="font-bold text-base text-base-content block leading-none">{currentChat.isGroup ? currentChat.name : peerUserObject?.name}</span>
                   <span className="text-[10px] opacity-50 mt-1 block">Active now</span>
                 </div>
               </div>
@@ -435,8 +496,15 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
 
                 return (
                   <div key={msg.id} className={`chat ${isMe ? 'chat-end' : 'chat-start'} group/bubble relative`}>
-                    <div className="chat-image avatar placeholder">
-                      <div className="bg-neutral text-neutral-content rounded-full w-8 h-8 text-[10px] flex items-center justify-center"><span>{getInitials(msg.sender?.name || (isMe ? 'You' : 'User'))}</span></div>
+                    
+                    <div className="chat-image avatar placeholder shrink-0">
+                      <div className="bg-neutral text-neutral-content font-bold rounded-full w-8 h-8 text-[10px] flex items-center justify-center overflow-hidden border border-base-300/30">
+                        {msg.sender?.avatarUrl ? (
+                          <img src={msg.sender.avatarUrl} alt={msg.sender.name} className="object-cover w-full h-full" />
+                        ) : (
+                          <span>{getInitials(msg.sender?.name || (isMe ? 'You' : 'User'))}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="chat-header text-[11px] opacity-50 mb-1 px-1">{isMe ? 'You' : (msg.sender?.name || 'Team Member')}</div>
                     
@@ -453,10 +521,41 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                         </button>
                       )}
                       
-                      <div className={`chat-bubble text-xs max-w-md leading-relaxed whitespace-pre-wrap ${
+                      <div className={`chat-bubble text-xs max-w-md leading-relaxed whitespace-pre-wrap flex flex-col gap-2 ${
                         isMe ? 'bg-primary text-white font-medium' : 'bg-base-200 text-base-content'
                       }`}>
-                        {renderMessageContentWithHighlights(msg.body, isMe)} 
+                        {msg.body && <div>{renderMessageContentWithHighlights(msg.body, isMe)}</div>}
+
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="flex flex-col gap-1.5 pt-1 border-t border-current/10 min-w-[180px] max-w-sm">
+                            {msg.attachments.map((url: string, index: number) => {
+                              const fName = getFileNameFromUrl(url);
+                              return isImageUrl(url) ? (
+                                <div key={index} className="rounded-xl overflow-hidden border border-base-300 shadow-2xs max-w-xs bg-base-100">
+                                  <img src={url} alt="Attached Timeline Graphic" className="object-cover w-full h-auto max-h-48" />
+                                </div>
+                              ) : (
+                                <a 
+                                  key={index} 
+                                  href={url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className={`flex items-center justify-between gap-3 p-2 border rounded-xl shadow-3xs transition-all font-semibold ${
+                                    isMe 
+                                      ? "bg-white/10 hover:bg-white/20 border-white/20 text-white" 
+                                      : "bg-base-100 hover:bg-base-200 border-base-300 text-base-content"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 shrink-0 opacity-80" />
+                                    <span className="truncate text-[11px]">{fName}</span>
+                                  </div>
+                                  <Download className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                                </a>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -465,88 +564,99 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
               <div ref={scrollRef} />
             </div>
 
-            {/* Custom Auto-complete Input Controller Panel Bar */}
             <footer className="p-3 border-t border-base-300 bg-base-100 font-sans">
-              <form className="flex gap-2 items-end" onSubmit={handleMessageDispatch}>
-                <div className="flex-1 bg-base-200 rounded-xl px-3 py-2 text-xs font-semibold focus-within:ring-2 focus-within:ring-primary focus-within:bg-base-100 transition-all text-left relative max-w-5xl">
-                  <MentionsInput
-                    value={messageText}
-                    onChange={(e, newValue) => setMessageText(newValue)}
+              <div className="card border border-base-300 bg-base-200/40 rounded-xl overflow-hidden shadow-2xs max-w-5xl">
+                <AttachmentPreviewList 
+                  files={attachments} 
+                  onRemove={(index) => setAttachments(p => p.filter((_, i) => i !== index))} 
+                />
+                
+                <form className="flex gap-2 items-center p-2 bg-base-100" onSubmit={handleMessageDispatch}>
+                  <MessageAttachmentButton 
+                    onUploadSuccess={(url, name) => setAttachments(p => [...p, { url, name }])} 
                     disabled={isPending}
-                    placeholder="Type a message, use @ to mention someone..."
-                    a11ySuggestionsListLabel="Suggested teammates for mention"
-                    className="w-full text-xs font-semibold outline-none bg-transparent"
-                    style={{
-                      control: {
-                        fontSize: 12,
-                        lineHeight: '20px',
-                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
-                        minHeight: '20px',
-                      },
-                      input: {
-                        margin: 0,
-                        padding: 0,
-                        border: '0px solid transparent',
-                        outline: 'none',
-                        fontSize: 12,
-                        lineHeight: '20px',
-                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
-                      },
-                      highlighter: {
-                        margin: 0,
-                        padding: 0,
-                        border: '0px solid transparent',
-                        fontSize: 12,
-                        lineHeight: '20px',
-                        fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
-                        boxSizing: 'border-box',
-                      },
-                      suggestions: {
-                        list: {
-                          backgroundColor: 'var(--fallback-b1,oklch(var(--b1)))',
-                          border: '1px solid var(--fallback-b3,oklch(var(--b3)))',
-                          borderRadius: '0.75rem',
+                  />
+
+                  <div className="flex-1 bg-base-200 rounded-xl px-3 py-2 text-xs font-semibold focus-within:ring-2 focus-within:ring-primary focus-within:bg-base-100 transition-all text-left relative">
+                    <MentionsInput
+                      value={messageText}
+                      onChange={(e, newValue) => setMessageText(newValue)}
+                      disabled={isPending}
+                      placeholder="Type a message, use @ to mention someone..."
+                      a11ySuggestionsListLabel="Suggested teammates for mention"
+                      className="w-full text-xs font-semibold outline-none bg-transparent"
+                      style={{
+                        control: {
                           fontSize: 12,
-                          padding: '0.25rem',
-                          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-                          position: 'absolute',
-                          bottom: '100%',
-                          left: 0,
-                          marginBottom: '0.5rem',
-                          maxHeight: '200px',
-                          overflowY: 'auto',
-                          zIndex: 50,
-                          minWidth: '220px',
+                          lineHeight: '20px',
+                          fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                          minHeight: '20px',
                         },
-                        item: {
-                          padding: '0.5rem 0.75rem',
-                          borderRadius: '0.5rem',
-                          '&focused': {
-                            backgroundColor: 'var(--fallback-p,oklch(var(--p)))',
-                            color: 'var(--fallback-pc,oklch(var(--pc)))',
-                            fontWeight: 'bold',
+                        input: {
+                          margin: 0,
+                          padding: 0,
+                          border: '0px solid transparent',
+                          outline: 'none',
+                          fontSize: 12,
+                          lineHeight: '20px',
+                          fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                        },
+                        highlighter: {
+                          margin: 0,
+                          padding: 0,
+                          border: '0px solid transparent',
+                          fontSize: 12,
+                          lineHeight: '20px',
+                          fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
+                          boxSizing: 'border-box',
+                        },
+                        suggestions: {
+                          list: {
+                            backgroundColor: 'var(--fallback-b1,oklch(var(--b1)))',
+                            border: '1px solid var(--fallback-b3,oklch(var(--b3)))',
+                            borderRadius: '0.75rem',
+                            fontSize: 12,
+                            padding: '0.25rem',
+                            boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                            position: 'absolute',
+                            bottom: '100%',
+                            left: 0,
+                            marginBottom: '0.5rem',
+                            maxHeight: '200px',
+                            overflowY: 'auto',
+                            zIndex: 50,
+                            minWidth: '220px',
+                          },
+                          item: {
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: '0.5rem',
+                            '&focused': {
+                              backgroundColor: 'var(--fallback-p,oklch(var(--p)))',
+                              color: 'var(--fallback-pc,oklch(var(--pc)))',
+                              fontWeight: 'bold',
+                            },
                           },
                         },
-                      },
-                    }}
+                      }}
+                    >
+                      <Mention
+                        trigger="@"
+                        data={activeDirectoryMembers} 
+                        markup="@[__display__](__id__)"
+                        displayTransform={(id, display) => `@${display}`} 
+                        className="text-primary font-bold bg-transparent" 
+                      />
+                    </MentionsInput>
+                  </div>
+                  <button 
+                    type="submit" 
+                    disabled={isPending || (!messageText.trim() && attachments.length === 0)} 
+                    className="btn btn-primary btn-sm h-9 px-5 font-bold rounded-xl cursor-pointer shadow-xs active:scale-[0.98] transition-all shrink-0"
                   >
-                    <Mention
-                      trigger="@"
-                      data={activeDirectoryMembers} 
-                      markup="@[__display__](__id__)"
-                      displayTransform={(id, display) => `@${display}`} 
-                      className="text-primary font-bold bg-transparent" 
-                    />
-                  </MentionsInput>
-                </div>
-                <button 
-                  type="submit" 
-                  disabled={isPending || !messageText.trim()} 
-                  className="btn btn-primary btn-sm h-9 px-5 font-bold rounded-xl cursor-pointer shadow-xs active:scale-[0.98] transition-all shrink-0"
-                >
-                  Send
-                </button>
-              </form>
+                    Send
+                  </button>
+                </form>
+              </div>
             </footer>
           </>
         ) : (

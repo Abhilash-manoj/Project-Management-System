@@ -3,10 +3,9 @@
 
 import React, { useState, useMemo, useActionState, useTransition } from "react";
 import { LayoutDashboard, Users, Activity, Settings, BarChart3, CheckCircle2, Clock, ShieldAlert, AlertTriangle, Trash2, UserMinus, Sliders, ArrowRight, Kanban } from "lucide-react";
-import { updateProjectGeneralDetails, completePurgeProjectWorkspace } from "@/app/actions/projects"; 
-import { removeMemberFromProjectAction } from "@/app/actions/projects";
+import { updateProjectGeneralDetails, completePurgeProjectWorkspace, removeMemberFromProjectAction } from "@/app/actions/projects"; 
 import AssignMemberModal from "./AssignMemberModal"; 
-import KanbanBoardContainer from "./KanbanBoardContainer"; // 🚀 NEW: Import your client board engine here
+import KanbanBoardContainer from "./KanbanBoardContainer"; 
 import Link from "next/link"; 
 import { useParams } from "next/navigation"; 
 
@@ -19,10 +18,9 @@ interface TabProps {
   settings: { id: string; name: string; description: string; visibility: string; organizationId?: string; creatorId?: string };
   currentUserId: string; 
   currentUserOrgRole: "OWNER" | "ADMIN" | "EMPLOYEE" | "GUEST"; 
-  // 🚀 NEW props: Injected from parent page database queries to drive the board view natively
   kanbanTasks: any[];
   boardColumns: string[];
-  serializedMembers: { id: string; name: string }[];
+  serializedMembers: { id: string; name: string; avatarUrl?: string | null }[];
 }
 
 export default function ProjectTabsContainer({ 
@@ -38,7 +36,6 @@ export default function ProjectTabsContainer({
   boardColumns,
   serializedMembers
 }: TabProps) {
-  // 🚀 UPDATED: Appended KANBAN state mapping option down into your main component hook array
   const [activeTab, setActiveTab] = useState<"OVERVIEW" | "KANBAN" | "MEMBERS" | "ACTIVITY" | "SETTINGS">("OVERVIEW");
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [isEvicting, startEvictionTransition] = useTransition();
@@ -46,7 +43,6 @@ export default function ProjectTabsContainer({
   const params = useParams();
   const currentProjectId = (params?.projectId || settings.id) as string;
 
-  // Permission evaluator loop
   const hasAdministrativeClearance = useMemo(() => {
     if (currentUserOrgRole === "OWNER") return true;
 
@@ -121,7 +117,6 @@ export default function ProjectTabsContainer({
             <LayoutDashboard className="h-4 w-4" /> Overview
           </button>
           
-          {/* 🚀 NEW: THE EMBEDDED NESTED KANBAN TAB TRIGGER BUTTON */}
           <button type="button" onClick={() => setActiveTab("KANBAN")} className={`tab tab-sm font-bold rounded-lg gap-1.5 transition-all cursor-pointer ${activeTab === "KANBAN" ? "tab-active bg-primary text-primary-content shadow-xs" : "text-base-content/60"}`}>
             <Kanban className="h-4 w-4" /> Kanban Board
           </button>
@@ -217,7 +212,7 @@ export default function ProjectTabsContainer({
         </div>
       )}
 
-      {/* 🚀 NEW: KANBAN TAB INTERACTION COMPONENT INJECTION */}
+      {/* KANBAN TAB */}
       {activeTab === "KANBAN" && (
         <div className="animate-fade-in w-full">
           <KanbanBoardContainer 
@@ -258,11 +253,21 @@ export default function ProjectTabsContainer({
                   const mEmail = m.email || m.user?.email || "";
                   const mId = m.userId || m.id; 
                   const isSelf = mId === currentUserId;
+                  const firstInitial = mName.charAt(0).toUpperCase();
 
                   return (
                     <tr key={idx} className="hover:bg-base-200/40 transition-colors">
                       <td className="py-3 px-4 flex items-center gap-3">
-                        <div className="avatar placeholder"><div className="h-8 w-8 bg-primary/10 border border-primary/20 text-primary font-black text-2xs rounded-full flex items-center justify-center"><span>{mName.charAt(0)}</span></div></div>
+                        {/* 🚀 FIXED: Render real-time user photo on team members tab row iteration loops */}
+                        <div className="avatar placeholder shrink-0">
+                          <div className="h-8 w-8 bg-neutral text-neutral-content font-bold rounded-full overflow-hidden flex items-center justify-center text-2xs select-none border border-base-300/40">
+                            {m.avatarUrl ? (
+                              <img src={m.avatarUrl} alt={`${mName}'s tab snapshot`} className="object-cover w-full h-full" />
+                            ) : (
+                              <span>{firstInitial}</span>
+                            )}
+                          </div>
+                        </div>
                         <div><p className="font-bold">{mName}</p><p className="text-[11px] text-base-content/40 font-normal">{mEmail}</p></div>
                       </td>
                       <td className="py-3 px-4"><span className="badge badge-primary badge-sm font-bold uppercase px-1.5 rounded">{m.role}</span></td>
@@ -313,7 +318,6 @@ export default function ProjectTabsContainer({
         <div className="space-y-6 animate-fade-in">
           {isAuthorized ? (
             <>
-              {/* INTERACTIVE BLUEPRINT WORKFLOW REDIRECT BANNER */}
               {canMutate && (
                 <div className="card bg-base-100 border border-base-300 p-5 rounded-2xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-base-100 to-base-200/40 text-left">
                   <div className="flex gap-3 items-center">

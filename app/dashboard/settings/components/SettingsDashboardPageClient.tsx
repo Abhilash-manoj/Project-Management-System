@@ -30,7 +30,7 @@ export default function SettingsDashboardPageClient({
   const [activeTab, setActiveTab] = useState<"PROFILE" | "THEME">("PROFILE");
   const [currentTheme, setCurrentTheme] = useState("light");
 
-  // CONTROLLED SUBMISSION STATES
+  // CONTROLLED TRANSACTIONS STATES
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(initialAvatarUrl);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -74,11 +74,9 @@ export default function SettingsDashboardPageClient({
     setIsSubmitting(true);
     setFormResult({ error: null, success: false });
 
-    console.log("🎯 [CLIENT] Form submit initiated. currentUserId status:", currentUserId);
-
     if (selectedFile && (!currentUserId || currentUserId === "undefined")) {
       setFormResult({
-        error: "Configuration Error: User identification parameter missing. Check your parent server component file mappings.",
+        error: "Configuration Error: User identification parameters are missing.",
         success: false,
       });
       setIsSubmitting(false);
@@ -89,26 +87,21 @@ export default function SettingsDashboardPageClient({
     let finalAvatarUrl = undefined;
 
     try {
-      // 1. Send the file binary to Vercel Storage explicitly
+      // 1. Deliver the file binary to Vercel Storage explicitly
       if (selectedFile) {
-        console.log("⏳ [CLIENT] Initiating upload chunk handshake workflow via Vercel framework...");
-        
-        // 🚀 FIXED: Set access right paths cleanly
+        // 🚀 FIXED: Re-added Date.now() timestamp suffix to break aggressive browser media caches
         const newBlob = await upload(`avatars/${currentUserId}-${Date.now()}`, selectedFile, {
           access: "public",
-          handleUploadUrl: "/api/upload",
+          handleUploadUrl: "/api/upload/avatar",
         });
         
-        console.log("✅ [CLIENT] Upload handshake completed. Hosted file link address:", newBlob?.url);
-        
         if (!newBlob?.url) {
-          throw new Error("Cloud host endpoint returned code 200 but failed to parse string URL.");
+          throw new Error("Cloud storage failed to resolve a secure asset pointer URL.");
         }
         finalAvatarUrl = newBlob.url;
       }
 
-      // 2. Deliver text parameters along with the resulting image url string link to Prisma
-      console.log("⏳ [CLIENT] Executing Prisma Server Action update request pipeline...");
+      // 2. Deliver input fields along with the resulting image URL string link to Prisma
       const res = await updateProfileSettings(formData, finalAvatarUrl);
       
       if (res?.error) {
@@ -119,9 +112,8 @@ export default function SettingsDashboardPageClient({
         router.refresh();      
       }
     } catch (err) {
-      console.error("❌ [CLIENT ENGINE ERROR]:", err);
       setFormResult({
-        error: err instanceof Error ? err.message : "Failed to securely save profile configuration files or upload assets.",
+        error: err instanceof Error ? err.message : "Failed to securely save profile configuration files.",
         success: false,
       });
     } finally {

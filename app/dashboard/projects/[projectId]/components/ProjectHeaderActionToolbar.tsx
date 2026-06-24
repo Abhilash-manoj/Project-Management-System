@@ -9,12 +9,13 @@ import AddTaskModalDialog from "./AddTaskModalDialog";
 interface MemberOption {
   id: string;
   name: string;
+  avatarUrl?: string | null; // 🚀 FIXED: Appended optional property to support image asset data flows
 }
 
 interface ToolbarProps {
   projectId: string;
   teamMembers: MemberOption[];
-  boardColumns: string[]; // 🚀 FIXED: Appended required prop to match newly updated model constraints
+  boardColumns: string[]; 
 }
 
 export default function ProjectHeaderActionToolbar({ projectId, teamMembers, boardColumns }: ToolbarProps) {
@@ -38,7 +39,7 @@ export default function ProjectHeaderActionToolbar({ projectId, teamMembers, boa
         <AddTaskModalDialog 
           projectId={projectId} 
           teamMembers={teamMembers} 
-          boardColumns={boardColumns} // 🚀 FIXED: Passed custom workflow columns down smoothly
+          boardColumns={boardColumns} 
           onClose={() => setIsTaskModalOpen(false)} 
         />
       )}

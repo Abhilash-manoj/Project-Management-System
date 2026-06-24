@@ -9,6 +9,7 @@ import { createTask } from "@/app/actions/tasks";
 interface MemberOption {
   id: string;
   name: string;
+  avatarUrl?: string | null; // 🚀 FIXED: Modified interface configuration to align with live avatar data flows
 }
 
 interface ModalProps {
@@ -16,7 +17,7 @@ interface ModalProps {
   teamMembers: MemberOption[];
   onClose: () => void;
   parentId?: string | null; 
-  boardColumns: string[]; // 🚀 NEW: Prop array declared to enable custom workflow lane injection
+  boardColumns: string[]; 
 }
 
 interface FormStateShape {
@@ -131,8 +132,7 @@ export default function AddTaskModalDialog({
             />
           </div>
 
-          {/* 🚀 NEW: STARTING PIPELINE STAGE INPUT ENGINE */}
-          {/* Only rendered for primary master cards since subtasks inherit flow states */}
+          {/* STARTING PIPELINE STAGE INPUT ENGINE */}
           {!parentId && (
             <div>
               <label className="label py-1">

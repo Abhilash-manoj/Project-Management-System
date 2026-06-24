@@ -27,6 +27,7 @@ export default async function MyTasksPage() {
       assignee: {
         select: {
           name: true,
+          avatarUrl: true, // 🚀 FIXED: Added to fetch live user photo pointers for your tasks summary view dashboards
         },
       },
     },

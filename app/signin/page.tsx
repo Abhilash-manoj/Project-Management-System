@@ -2,7 +2,7 @@
 import React from "react";
 import SignInForm from "./components/SignInForm";
 import Link from "next/link";
-import { LogIn, ShieldAlert } from "lucide-react"; // 🚀 IMPORTED ShieldAlert
+import { LogIn, ShieldAlert } from "lucide-react"; 
 
 interface PageProps {
   searchParams: Promise<{
@@ -11,7 +11,7 @@ interface PageProps {
 }
 
 export default async function SignInPage({ searchParams }: PageProps) {
-  // 🚀 FIXED: Await and destructure searchParams safely on the server side
+  // Await and destructure searchParams safely on the server side
   const { error } = await searchParams;
   const isDeactivated = error === "deactivated";
 
@@ -35,7 +35,7 @@ export default async function SignInPage({ searchParams }: PageProps) {
           </p>
         </div>
 
-        {/* 🚀 FIXED: Render the warning banner conditionally if kicked by the middleware access shield */}
+        {/* Render the warning banner conditionally if kicked by the middleware access shield */}
         {isDeactivated && (
           <div className="alert alert-error text-xs font-bold rounded-xl text-error-content bg-error flex items-start gap-2 text-left p-3 border border-error/20 animate-fade-in">
             <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
@@ -51,8 +51,18 @@ export default async function SignInPage({ searchParams }: PageProps) {
         {/* Renders our clean, type-safe interactive Client form element */}
         <SignInForm />
 
+        {/* 🚀 FIXED: Added self-service recovery link anchor node */}
+        <div className="text-center text-xs -mt-2">
+          <Link 
+            href="/forgotPassword" 
+            className="text-primary font-bold transition-all hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
+
         {/* Footer Navigation Link Wrapper */}
-        <div className="text-center text-xs font-semibold text-neutral/40 pt-2 border-t border-base-300/60">
+        <div className="text-center text-xs font-semibold text-neutral/40 pt-4 border-t border-base-300/60">
           Don&apos;t have an account?{" "}
           <Link href="/signup" className="link link-primary font-bold transition-all no-underline hover:underline">
             Create a workspace

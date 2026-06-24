@@ -60,9 +60,6 @@ export default function SignInForm() {
               <KeyRound className="h-3 w-3 text-primary" /> Password
             </span>
           </label>
-          <a href="#" className="link link-primary text-[11px] font-bold no-underline hover:underline transition-colors">
-            Forgot password?
-          </a>
         </div>
         <input 
           name="password" 

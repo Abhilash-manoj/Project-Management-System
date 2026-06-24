@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useTransition } from "react";
-import { X, Trash2, UserX, Crown, ShieldAlert } from "lucide-react";
+import { X, Trash2, UserX, Crown } from "lucide-react";
 import { removeUserFromGroup, deleteGroupChat } from "@/app/actions/communication";
 
 interface GroupInfoSidebarProps {
@@ -36,6 +36,9 @@ export default function GroupInfoSidebar({ conversation, currentUserId, onClose,
     });
   };
 
+  const getInitials = (name: string) => 
+    name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '??';
+
   return (
     <aside className="w-72 border-l border-base-300 flex flex-col bg-base-200/20 h-full text-left font-sans animate-fade-in shrink-0">
       {/* Header Container */}
@@ -60,9 +63,22 @@ export default function GroupInfoSidebar({ conversation, currentUserId, onClose,
               return (
                 <div key={userNode.id} className="flex items-center justify-between p-2 bg-base-100 border border-base-300/40 rounded-xl transition-all group/user hover:border-base-300">
                   <div className="flex items-center gap-2 min-w-0 pr-2">
-                    <div className="bg-neutral text-neutral-content rounded-full w-7 h-7 text-[10px] font-bold flex items-center justify-center uppercase shrink-0">
-                      {userNode.name?.substring(0, 2)}
+                    
+                    {/* 🚀 FIXED: Render user cloud profile avatars with standard initials text fallbacks */}
+                    <div className="avatar placeholder shrink-0">
+                      <div className="bg-neutral text-neutral-content font-bold rounded-full w-7 h-7 text-[10px] flex items-center justify-center overflow-hidden border border-base-300">
+                        {userNode.avatarUrl ? (
+                          <img 
+                            src={userNode.avatarUrl} 
+                            alt={`${userNode.name}'s info thumbnail`} 
+                            className="object-cover w-full h-full" 
+                          />
+                        ) : (
+                          <span>{getInitials(userNode.name)}</span>
+                        )}
+                      </div>
                     </div>
+
                     <div className="min-w-0">
                       <div className="text-xs font-bold truncate text-neutral flex items-center gap-1">
                         {userNode.name} {isMe && <span className="text-[9px] opacity-40 italic font-medium">(You)</span>}
@@ -77,7 +93,7 @@ export default function GroupInfoSidebar({ conversation, currentUserId, onClose,
                       </span>
                     )}
 
-                    {/* Moderation Drop Member Control Trigger Button */}
+                    {/* Moderation Control Button */}
                     {isCreator && !isThisUserCreator && (
                       <button
                         onClick={() => handleRemoveMember(userNode.id)}
@@ -95,7 +111,7 @@ export default function GroupInfoSidebar({ conversation, currentUserId, onClose,
           </div>
         </div>
 
-        {/* Global Structural Deruption Deletion Block Panel */}
+        {/* Global Structural Disruption Deletion Block Panel */}
         {isCreator && (
           <div className="pt-4 border-t border-base-300/50">
             <button

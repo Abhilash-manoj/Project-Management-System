@@ -17,6 +17,12 @@ export default async function DashboardLayout({
   const session = await getSession();
   if (!session) redirect("/signin");
 
+  // Fetch user details directly from database to secure the latest avatarUrl live state
+  const userRecord = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { avatarUrl: true }
+  });
+
   const userMembership = await prisma.membership.findFirst({
     where: { userId: session.userId },
     include: { organization: true },
@@ -26,7 +32,6 @@ export default async function DashboardLayout({
   const organizationInitial = organizationName.charAt(0).toUpperCase();
   const orgId = userMembership?.organizationId || "";
   
-  // 🚀 FETCH LIVE UNREAD ALERTS COUNTS ON SERVER BOOT
   const unreadAlertsCount = orgId 
     ? await getUnreadNotificationCount(session.userId, orgId) 
     : 0;
@@ -59,11 +64,22 @@ export default async function DashboardLayout({
         <div className="p-2 bg-base-200 rounded-xl border border-base-300">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="avatar placeholder">
-                <div className="bg-primary text-primary-content font-bold rounded-full h-9 w-9 shadow-inner flex items-center justify-center">
-                  <span className="text-xs">{userInitials}</span>
+              
+              {/* DYNAMIC AVATAR HOOK WITH FALLBACK INITIALS */}
+              <div className="avatar placeholder shrink-0">
+                <div className="bg-primary text-primary-content font-bold rounded-full h-9 w-9 shadow-inner flex items-center justify-center overflow-hidden">
+                  {userRecord?.avatarUrl ? (
+                    <img 
+                      src={userRecord.avatarUrl} 
+                      alt="User Profile Thumbnail" 
+                      className="object-cover w-full h-full"
+                    />
+                  ) : (
+                    <span className="text-xs">{userInitials}</span>
+                  )}
                 </div>
               </div>
+
               <div className="min-w-0">
                 <p className="font-bold text-xs text-base-content truncate">{session.name}</p>
                 <p className="text-[10px] text-base-content/50 font-black uppercase tracking-wider">
@@ -91,7 +107,6 @@ export default async function DashboardLayout({
         {/* TOP NAVBAR HEADER */}
         <header className="h-16 border-b border-b-base-300 bg-base-100 flex items-center justify-between px-8 shrink-0 z-30">
           <div className="flex items-center gap-6">
-            {/* Workspace Dropdown */}
             <div className="flex items-center gap-2 bg-base-200 hover:bg-base-300 transition-colors border border-base-300 rounded-xl px-3 py-1.5 cursor-pointer shrink-0">
               <span className="badge badge-primary badge-sm font-bold text-primary-content rounded-md p-1.5">
                 {organizationInitial}
@@ -102,7 +117,6 @@ export default async function DashboardLayout({
           </div>
 
           <div className="flex items-center gap-4 shrink-0">
-            {/* 🚀 FIXED: Wrapped Bell inside routing Link and changed indicator to dynamic unread count */}
             <Link 
               href="/dashboard/notifications" 
               className="btn btn-ghost btn-circle btn-sm relative text-base-content/60 hover:text-base-content"

@@ -298,6 +298,7 @@ model Comment {
   body      String
   taskId    String
   authorId  String
+  attachments String[] @default([])
   createdAt DateTime @default(now())
 
   // Relations
@@ -401,4 +402,15 @@ model Attachment {
 
   messageId  String?
   message    Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
