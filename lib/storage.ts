@@ -50,8 +50,7 @@ export async function processPublicAvatarUpload(
   return await handleUpload({
     body: requestBody,
     request: rawRequest,
-    // Explicitly overrides the default token to target the public store bucket
-    token: process.env.BLOBP_STORE_ID, 
+    // Explicitly overrides the default token to target the public store bucket 
     onBeforeGenerateToken: async () => {
       const session = await getSession();
       if (!session || !session.userId) throw new Error("Unauthorized");
