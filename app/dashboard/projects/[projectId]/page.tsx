@@ -18,24 +18,31 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const { projectId } = await params;
 
-  // 1. SECURITY PERIMETER CHECK: Validate project-level contextual clearances
-  const guard = await verifyProjectAccess(projectId);
-  if (!guard.authorized) {
-    redirect("/dashboard");
-  }
-
-  // Query the authenticated user's organization-wide workspace membership profile
+  // ==========================================================================
+  // 🔑 STEP 1: RESOLVE USER GLOBAL ROLE FIRST BEFORE ENFORCING PERIMETER ROSTERS
+  // ==========================================================================
   const currentMembership = await prisma.membership.findFirst({
     where: { userId: session.userId },
   });
   if (!currentMembership) redirect("/signup/organization");
 
-  const projectData = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!projectData) notFound();
-
   const isGlobalOwner = currentMembership.role === "OWNER";
   const isGlobalAdmin = currentMembership.role === "ADMIN";
   const isOwnerOrAdmin = isGlobalOwner || isGlobalAdmin;
+
+  // ==========================================================================
+  // 🛡️ STEP 2: SECURITY PERIMETER CHECK WITH GLOBAL ADMIN BYPASS
+  // ==========================================================================
+  // If they are a global administrator, bypass project roster checks entirely
+  if (!isOwnerOrAdmin) {
+    const guard = await verifyProjectAccess(projectId);
+    if (!guard.authorized) {
+      redirect("/dashboard");
+    }
+  }
+
+  const projectData = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!projectData) notFound();
 
   // Hierarchical Leaf-Node Progress Metric Calculator Engine
   const standaloneTasks = await prisma.task.findMany({
@@ -71,7 +78,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           id: true, 
           name: true, 
           email: true,
-          avatarUrl: true, // 🚀 FIXED: Added to sync live teammate avatars across project tabs
+          avatarUrl: true, 
           memberships: {
             where: { organizationId: currentMembership.organizationId },
             select: { 
@@ -87,7 +94,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   const serializedMembers = projectAssignments.map(a => ({
     id: String(a.user.id || ""),
     name: String(a.user.name || "Unknown Teammate"),
-    avatarUrl: a.user.avatarUrl // 🚀 FIXED: Propagate fallback tracking down to form selection fields
+    avatarUrl: a.user.avatarUrl 
   }));
 
   // ==========================================================================
@@ -111,12 +118,10 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     },
     orderBy: { createdAt: "asc" },
     include: {
-      // 🚀 FIXED: Added avatarUrl to parent card assignees on the Kanban board view
       assignee: { select: { name: true, avatarUrl: true } },
       subTasks: {
         orderBy: { createdAt: "asc" },
         include: {
-          // 🚀 FIXED: Added avatarUrl to child task card assignees inside the drilldown views
           assignee: { select: { name: true, avatarUrl: true } }
         }
       }
@@ -177,15 +182,21 @@ export default async function ProjectDetailPage({ params }: PageProps) {
     };
   });
 
-  // 🔒 ATTRIBUTE ACCESS PERMISSION CHECK (ABAC GATEWAY)
+  // ==========================================================================
+  // 🔒 ATTRIBUTE PROTECTION FLAGS FOR INTERACTIVE PERMISSIONS
+  // ==========================================================================
   const isCreator = projectData.creatorId === session.userId;
   const isAssigned = projectAssignments.some(a => a.userId === session.userId);
 
-  if (projectData.visibility === "PRIVATE" && !isGlobalOwner && !isGlobalAdmin && !isAssigned) {
+  // Private Visibility Guard Check
+  if (projectData.visibility === "PRIVATE" && !isOwnerOrAdmin && !isAssigned) {
     redirect("/dashboard/projects");
   }
 
-  const canMutate = isGlobalOwner || isCreator || isAssigned;
+  // 🚀 ADMIN VIEW MUTATION ACCESS MATRIX WRAPPER
+  // Non-participant Admins/Owners pass the isOwnerOrAdmin gate above to VIEW the board,
+  // but they fail 'canMutate' here, locking them into Read-Only safety mode!
+  const canMutate = isCreator || isAssigned;
 
   return (
     <ProjectTabsContainer
@@ -207,7 +218,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           id: a.user.id,
           name: a.user.name,
           email: a.user.email,
-          avatarUrl: a.user.avatarUrl, // 🚀 FIXED: Pass the image straight down to child rosters
+          avatarUrl: a.user.avatarUrl,
           role: computedRole, 
           department: computedDept, 
           status: "Active",
