@@ -6,40 +6,49 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    // 1. Enforce active database authentication checks first
     const session = await getSession();
     if (!session || !session.userId) {
       return NextResponse.json({ error: "Unauthorized access attempt" }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const fileUrl = searchParams.get("url");
+    let rawFileUrl = searchParams.get("url");
 
-    if (!fileUrl) {
+    if (!rawFileUrl) {
       return NextResponse.json({ error: "Missing source file target URL" }, { status: 400 });
     }
 
-    // 2. Securely fetch the file from the private store using the secret token header
-    // This authenticates our server with Vercel's private storage infrastructure
+    let fileUrl = decodeURIComponent(rawFileUrl);
+    while (fileUrl.includes("url=")) {
+      const parts = fileUrl.split("url=");
+      fileUrl = decodeURIComponent(parts[parts.length - 1]);
+    }
+
+    if (!fileUrl.startsWith("http://") && !fileUrl.startsWith("https://")) {
+      return NextResponse.json({ error: "Invalid target protocol address string" }, { status: 400 });
+    }
+
+    // 1. Resolve your tokens 
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const storeId = process.env.BLOB_STORE_ID;
+
+    // 2. Fetch from Vercel Private Blob
+    // 🚀 FIXED: Added the required x-storage-id header to satisfy OIDC verification handshake
     const response = await fetch(fileUrl, {
       headers: {
-        Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
+        Authorization: `Bearer ${token}`,
+        ...(storeId && { "x-storage-id": storeId }),
       },
     });
 
     if (!response.ok) {
-      console.error(`Storage connection rejected with status code: ${response.status}`);
-      return NextResponse.json({ error: "Failed to download secure asset stream from storage." }, { status: response.status });
+      console.error(`❌ Storage proxy rejected: ${response.status} for URL: ${fileUrl}`);
+      return NextResponse.json({ error: "Failed to stream asset" }, { status: response.status });
     }
 
-    // 3. Extract the clean file name from the path string
-    const fileName = decodeURIComponent(fileUrl.split("/").pop() || "attachment")
-      .replace(/^\d+-/, ""); // Strip the unique timestamp prefix
-
-    // 4. Extract content headers from the storage response
+    const fileName = fileUrl.split("/").pop() || "attachment";
     const contentType = response.headers.get("content-type") || "application/octet-stream";
 
-    // 5. Pipe the unexposed file binary stream directly to the authorized user's session
     return new Response(response.body, {
       headers: {
         "Content-Type": contentType,

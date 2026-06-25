@@ -3,14 +3,15 @@
 
 import React, { useState, useEffect, useRef, useTransition } from 'react';
 import { getUserConversations, sendMessage, getOrCreatePrivateChat, deleteMessageAction, getConversationMessages } from '@/app/actions/communication';
-import { searchCompanyDirectory } from '@/app/actions/directory'; // 🚀 FIXED: Removed old getMembershipRoleAction import reference
+import { searchCompanyDirectory } from '@/app/actions/directory'; 
 import CreateGroupModal from "./CreateGroupModal";
 import GroupInfoSidebar from "./GroupInfoSidebar"; 
 import MessageAttachmentButton from "./MessageAttachmentButton";
-import AttachmentPreviewList from "./Attachmentpreviewlist"; // 🚀 FIXED: Standardized case-sensitivity path naming to match components specs
+import AttachmentPreviewList from "./Attachmentpreviewlist"; 
+import SecureChatAttachment from "./SecureChatAttachment"; // 🚀 FIXED: Added the secure streaming image/doc viewer
 import PusherClient from 'pusher-js';
 import { MentionsInput, Mention } from 'react-mentions'; 
-import { Info, Download, FileText } from 'lucide-react'; 
+import { Info } from 'lucide-react'; 
 
 interface ChatWorkspaceCanvasProps {
   currentUserId: string;
@@ -58,7 +59,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
 
     async function resolveActiveWorkspacePermissions() {
       try {
-        // 🚀 FIXED: Direct dynamic fetch handshake targeting the new micro-route endpoint
         const response = await fetch(`/api/membership?orgId=${organizationId}&userId=${currentUserId}`);
         if (!response.ok) throw new Error("HTTP Handshake failed");
         
@@ -291,22 +291,6 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
     return segments.length > 0 ? segments : textBody;
   };
 
-  const isImageUrl = (url: string) => {
-    const cleanUrl = url.split(/[?#]/)[0];
-    return /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(cleanUrl);
-  };
-
-  const getFileNameFromUrl = (url: string) => {
-    try {
-      const decoded = decodeURIComponent(url);
-      const parts = decoded.split('/');
-      const lastPart = parts[parts.length - 1];
-      return lastPart.replace(/^\d+-/, ''); 
-    } catch {
-      return "Linked Shared Document File";
-    }
-  };
-
   const cleanPreviewText = (text: string) => {
     if (!text) return "No messages yet";
     return text.replace(/@\[([^\]]+)\]\(([^)]+)\)/g, '@$1');
@@ -526,34 +510,12 @@ export default function ChatWorkspaceCanvas({ currentUserId, organizationId }: C
                       }`}>
                         {msg.body && <div>{renderMessageContentWithHighlights(msg.body, isMe)}</div>}
 
+                        {/* 🚀 FIXED: Routed all attachments securely through SecureChatAttachment */}
                         {msg.attachments && msg.attachments.length > 0 && (
-                          <div className="flex flex-col gap-1.5 pt-1 border-t border-current/10 min-w-[180px] max-w-sm">
-                            {msg.attachments.map((url: string, index: number) => {
-                              const fName = getFileNameFromUrl(url);
-                              return isImageUrl(url) ? (
-                                <div key={index} className="rounded-xl overflow-hidden border border-base-300 shadow-2xs max-w-xs bg-base-100">
-                                  <img src={url} alt="Attached Timeline Graphic" className="object-cover w-full h-auto max-h-48" />
-                                </div>
-                              ) : (
-                                <a 
-                                  key={index} 
-                                  href={url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className={`flex items-center justify-between gap-3 p-2 border rounded-xl shadow-3xs transition-all font-semibold ${
-                                    isMe 
-                                      ? "bg-white/10 hover:bg-white/20 border-white/20 text-white" 
-                                      : "bg-base-100 hover:bg-base-200 border-base-300 text-base-content"
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <FileText className="h-4 w-4 shrink-0 opacity-80" />
-                                    <span className="truncate text-[11px]">{fName}</span>
-                                  </div>
-                                  <Download className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                                </a>
-                              );
-                            })}
+                          <div className="flex flex-col gap-2 pt-1 border-t border-current/10 min-w-[200px] max-w-sm">
+                            {msg.attachments.map((url: string, index: number) => (
+                              <SecureChatAttachment key={index} privateUrl={url} />
+                            ))}
                           </div>
                         )}
                       </div>

@@ -4,8 +4,9 @@
 import React, { useState, useEffect, useTransition } from 'react';
 import { getTaskComments, createTaskComment } from '@/app/actions/comments';
 import MessageAttachmentButton from '@/app/dashboard/messages/components/MessageAttachmentButton';
-import AttachmentPreviewList from '@/app/dashboard/messages/components/Attachmentpreviewlist'; // 🚀 FIXED: Casing standardized to match components layout file spec
-import { Send, ShieldAlert, FileText, Download } from 'lucide-react';
+import AttachmentPreviewList from '@/app/dashboard/messages/components/Attachmentpreviewlist'; 
+import SecureChatAttachment from "@/app/dashboard/messages/components/SecureChatAttachment"; // 🚀 FIXED: Imported secure streaming proxy interface
+import { Send, ShieldAlert } from 'lucide-react';
 
 interface TaskCommentsProps {
   taskId: string;
@@ -64,22 +65,6 @@ export default function TaskComments({ taskId, currentUserId }: TaskCommentsProp
     });
   };
 
-  const isImageUrl = (url: string) => {
-    const cleanUrl = url.split(/[?#]/)[0];
-    return /\.(jpeg|jpg|gif|png|webp|avif)$/i.test(cleanUrl);
-  };
-
-  const getFileNameFromUrl = (url: string) => {
-    try {
-      const decoded = decodeURIComponent(url);
-      const parts = decoded.split('/');
-      const lastPart = parts[parts.length - 1];
-      return lastPart.replace(/^\d+-/, ''); // Remove historical timestamp prefixes
-    } catch {
-      return "Linked File Document";
-    }
-  };
-
   const getInitials = (name: string) => 
     name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : '??';
 
@@ -129,31 +114,12 @@ export default function TaskComments({ taskId, currentUserId }: TaskCommentsProp
                   </div>
                   {comment.body && <p className="text-base-content/80 leading-relaxed break-words">{comment.body}</p>}
 
-                  {/* Render inline private attachments inside comments bubble frame */}
+                  {/* 🚀 FIXED: Managed private file rendering seamlessly through SecureChatAttachment */}
                   {comment.attachments && comment.attachments.length > 0 && (
-                    <div className="flex flex-col gap-1.5 pt-1.5 border-t border-base-300/60 max-w-sm">
-                      {comment.attachments.map((url: string, index: number) => {
-                        const fName = getFileNameFromUrl(url);
-                        return isImageUrl(url) ? (
-                          <div key={index} className="rounded-xl overflow-hidden border border-base-300 shadow-3xs max-w-xs bg-base-100 mt-0.5">
-                            <img src={url} alt="Attached Comment Asset" className="object-cover w-full h-auto max-h-40" />
-                          </div>
-                        ) : (
-                          <a 
-                            key={index} 
-                            href={url} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="flex items-center justify-between gap-3 p-2 bg-base-100 hover:bg-base-200 border border-base-300 rounded-xl shadow-3xs transition-all font-semibold text-base-content"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <FileText className="h-3.5 w-3.5 shrink-0 opacity-70 text-primary" />
-                              <span className="truncate text-[11px]">{fName}</span>
-                            </div>
-                            <Download className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                          </a>
-                        );
-                      })}
+                    <div className="flex flex-col gap-2 pt-2 border-t border-base-300/60 min-w-[180px] max-w-sm">
+                      {comment.attachments.map((url: string, index: number) => (
+                        <SecureChatAttachment key={index} privateUrl={url} />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -164,7 +130,6 @@ export default function TaskComments({ taskId, currentUserId }: TaskCommentsProp
       </div>
 
       {/* Comment Form Input controls */}
-      {/* 🚀 FIXED: Standardized form container layout card for structural separation */}
       <div className="card border border-base-300 bg-base-200/40 rounded-xl overflow-hidden shadow-2xs w-full mt-2">
         <AttachmentPreviewList 
           files={attachments} 
