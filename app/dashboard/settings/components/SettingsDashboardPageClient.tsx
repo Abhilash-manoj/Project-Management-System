@@ -87,9 +87,7 @@ export default function SettingsDashboardPageClient({
     let finalAvatarUrl = undefined;
 
     try {
-      // 1. Deliver the file binary to Vercel Storage explicitly
       if (selectedFile) {
-        // 🚀 FIXED: Re-added Date.now() timestamp suffix to break aggressive browser media caches
         const newBlob = await upload(`avatars/${currentUserId}-${Date.now()}`, selectedFile, {
           access: "public",
           handleUploadUrl: "/api/upload/avatar",
@@ -101,7 +99,6 @@ export default function SettingsDashboardPageClient({
         finalAvatarUrl = newBlob.url;
       }
 
-      // 2. Deliver input fields along with the resulting image URL string link to Prisma
       const res = await updateProfileSettings(formData, finalAvatarUrl);
       
       if (res?.error) {
@@ -174,7 +171,6 @@ export default function SettingsDashboardPageClient({
                   </div>
                 )}
 
-                {/* INTERACTIVE AVATAR DISPLAY FRAME */}
                 <div className="flex flex-col items-center sm:items-start gap-3 pb-2">
                   <span className="text-[10px] font-bold text-neutral/50 uppercase tracking-wider">Profile Photo</span>
                   <div className="relative group/avatar">
@@ -264,6 +260,37 @@ export default function SettingsDashboardPageClient({
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {/* 🚀 FIXED: Added the complete render container card block for the THEME selection grid */}
+          {activeTab === "THEME" && (
+            <div className="card bg-base-100 border border-base-300 p-6 rounded-2xl shadow-2xs space-y-4 animate-fade-in">
+              <div className="border-b border-base-300 pb-2">
+                <h3 className="text-base font-black tracking-tight">Workspace Themes</h3>
+                <p className="text-[11px] text-neutral/40 font-semibold uppercase tracking-wider">Appearance customization</p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+                {AVAILABLE_THEMES.map((themeName) => {
+                  const isSelected = currentTheme === themeName;
+                  return (
+                    <button
+                      key={themeName}
+                      type="button"
+                      onClick={() => handleThemeChange(themeName)}
+                      className={`p-3 rounded-xl border text-xs font-bold uppercase tracking-wider text-center transition-all flex items-center justify-between cursor-pointer ${
+                        isSelected
+                          ? "bg-primary border-primary text-primary-content font-black shadow-xs"
+                          : "bg-base-200 hover:bg-base-300 border-base-300 text-neutral"
+                      }`}
+                    >
+                      <span>{themeName}</span>
+                      {isSelected && <span className="text-xs">✨</span>}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
